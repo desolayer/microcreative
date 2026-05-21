@@ -16,6 +16,7 @@ import walletRouter       from './routes/wallet.js'
 import paymentsRouter     from './routes/payments.js'
 import profileRouter      from './routes/profile.js'
 import notificationsRouter from './routes/notifications.js'
+import botRouter           from './routes/bot.js'
 
 const app = express()
 
@@ -36,8 +37,9 @@ const limiter = rateLimit({
 })
 app.use('/api', limiter)
 
-// ── Вебхуки (без авторизации — платёжные системы сами вызывают) ──
-app.use('/api/webhooks', paymentsRouter)
+// ── Вебхуки (без авторизации) ─────────────────────────
+app.use('/api/webhooks', paymentsRouter)  // CryptoBot / Cryptomus
+app.use('/api/bot',      botRouter)       // Telegram Bot updates
 
 // ── API с авторизацией ────────────────────────────────
 app.use('/api', authMiddleware)
