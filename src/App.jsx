@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import BottomNav from './components/BottomNav'
 import FeedPage from './pages/FeedPage'
+import CreateOrderPage from './pages/CreateOrderPage'
 import { profileAPI, notificationsAPI, walletAPI } from './utils/api'
 import { useStore } from './store/useStore'
 
@@ -58,10 +59,10 @@ export default function App() {
 
       case 'create':
         return (
-          <div style={styles.placeholder}>
-            <i className="ti ti-plus" style={{ fontSize: 48, color: '#a78bfa' }} />
-            <div style={{ color: '#555', marginTop: 12 }}>Создание заказа</div>
-          </div>
+          <CreateOrderPage
+            onBack={() => navigate('feed')}
+            onSuccess={() => navigate('feed')}
+          />
         )
 
       case 'deals':
@@ -93,7 +94,7 @@ export default function App() {
     }
   }
 
-  const hideNav = ['order-detail', 'deal', 'payment', 'respond'].includes(currentPage)
+  const hideNav = ['order-detail', 'deal', 'payment', 'respond', 'create'].includes(currentPage)
 
   return (
     <div style={styles.app}>
