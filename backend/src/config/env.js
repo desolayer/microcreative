@@ -12,8 +12,9 @@ export const config = {
   },
 
   platformCommission: parseFloat(process.env.PLATFORM_COMMISSION || '10'),
-  backendUrl: process.env.BACKEND_URL || 'http://localhost:3000',
+  backendUrl:  process.env.BACKEND_URL  || 'http://localhost:3000',
   frontendUrl: process.env.FRONTEND_URL || 'https://microcreative-extract.vercel.app',
+  adminTelegramId: process.env.ADMIN_TELEGRAM_ID || null,
 }
 
 // Проверяем обязательные переменные

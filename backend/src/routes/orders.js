@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { db } from '../config/database.js'
+import { notifyAdmin } from '../services/adminNotify.js'
 
 const router = Router()
 
@@ -55,6 +56,11 @@ router.get('/:id', async (req, res, next) => {
 // POST /api/orders
 router.post('/', async (req, res, next) => {
   try {
+    // Забаненные не могут создавать заказы
+    if (req.user.is_banned) {
+      return res.status(403).json({ error: 'Your account is banned' })
+    }
+
     const { title, description, category, budget, currency, deadline_days, files } = req.body
 
     if (!title || !description || !category || !budget || !currency) {
@@ -68,6 +74,11 @@ router.post('/', async (req, res, next) => {
       [req.user.id, title, description, category, budget, currency,
        deadline_days || 3, JSON.stringify(files || [])]
     )
+
+    // Уведомляем администратора
+    const who = req.user.username ? `@${req.user.username}` : req.user.first_name
+    notifyAdmin(`📋 Новый заказ: «${title}», ${budget} ${currency} от ${who}`).catch(() => {})
+
     res.status(201).json(rows[0])
   } catch (err) {
     next(err)
@@ -79,6 +90,11 @@ router.post('/:id/respond', async (req, res, next) => {
   try {
     const { message, price, currency, deadline_days } = req.body
     const orderId = req.params.id
+
+    // Забаненные не могут откликаться
+    if (req.user.is_banned) {
+      return res.status(403).json({ error: 'Your account is banned' })
+    }
 
     // Нельзя откликнуться на свой заказ
     const { rows: orderRows } = await db.query(

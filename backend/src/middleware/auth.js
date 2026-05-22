@@ -1,11 +1,8 @@
 import crypto from 'crypto'
 import { config } from '../config/env.js'
 import { db } from '../config/database.js'
+import { notifyAdmin } from '../services/adminNotify.js'
 
-/**
- * Проверяет подпись Telegram initData.
- * Алгоритм: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
- */
 function validateTelegramInitData(initData) {
   if (!initData) return null
 
@@ -13,14 +10,12 @@ function validateTelegramInitData(initData) {
   const hash = params.get('hash')
   if (!hash) return null
 
-  // Собираем строку для проверки — все поля кроме hash, отсортированные по ключу
   params.delete('hash')
   const dataCheckString = [...params.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`)
     .join('\n')
 
-  // Секретный ключ = HMAC-SHA256("WebAppData", bot_token)
   const secretKey = crypto
     .createHmac('sha256', 'WebAppData')
     .update(config.telegramBotToken)
@@ -33,7 +28,6 @@ function validateTelegramInitData(initData) {
 
   if (expectedHash !== hash) return null
 
-  // Проверяем, что данные не старше 24 часов
   const authDate = parseInt(params.get('auth_date') || '0')
   const now = Math.floor(Date.now() / 1000)
   if (now - authDate > 86400) return null
@@ -48,14 +42,9 @@ function validateTelegramInitData(initData) {
   }
 }
 
-/**
- * Express middleware — авторизует запрос через Telegram initData.
- * Устанавливает req.user с данными из БД (создаёт если нет).
- */
 export async function authMiddleware(req, res, next) {
   const initData = req.headers['x-telegram-init-data']
 
-  // В dev-режиме позволяем тестировать без initData
   if (config.nodeEnv === 'development' && !initData) {
     const devUser = await getOrCreateUser({
       id: 12345,
@@ -90,7 +79,7 @@ async function getOrCreateUser(telegramUser) {
        last_name  = EXCLUDED.last_name,
        photo_url  = COALESCE(EXCLUDED.photo_url, users.photo_url),
        updated_at = NOW()
-     RETURNING *`,
+     RETURNING *, (xmax = 0) AS is_new`,
     [
       telegramUser.id,
       telegramUser.username || null,
@@ -99,5 +88,13 @@ async function getOrCreateUser(telegramUser) {
       telegramUser.photo_url || null,
     ]
   )
-  return rows[0]
+  const user = rows[0]
+
+  // Уведомляем администратора о новом пользователе
+  if (user.is_new) {
+    const who = user.username ? `@${user.username}` : user.first_name
+    notifyAdmin(`👤 Новый пользователь: ${who} (ID: ${user.telegram_id})`).catch(() => {})
+  }
+
+  return user
 }

@@ -2,11 +2,11 @@ import { useStore } from '../store/useStore'
 import { useTelegram } from '../hooks/useTelegram'
 
 const tabs = [
-  { id: 'feed',          icon: 'ti-layout-grid', label: 'Лента' },
-  { id: 'deals',         icon: 'ti-message',     label: 'Сделки' },
-  { id: 'create',        icon: null,             label: 'Заказ' },
-  { id: 'wallet',        icon: 'ti-wallet',      label: 'Кошелёк' },
-  { id: 'notifications', icon: 'ti-bell',        label: 'Уведомления' },
+  { id: 'feed',    icon: 'ti-layout-grid', label: 'Лента' },
+  { id: 'deals',   icon: 'ti-message',     label: 'Сделки' },
+  { id: 'create',  icon: null,             label: 'Заказ' },
+  { id: 'wallet',  icon: 'ti-wallet',      label: 'Кошелёк' },
+  { id: 'profile', icon: 'ti-user',        label: 'Профиль' },
 ]
 
 export default function BottomNav({ onNavigate }) {
@@ -43,8 +43,8 @@ export default function BottomNav({ onNavigate }) {
                 className={`ti ${tab.icon}`}
                 style={{ fontSize: 22, color: isActive ? '#a78bfa' : '#444' }}
               />
-              {/* Бейдж непрочитанных для уведомлений */}
-              {tab.id === 'notifications' && unreadCount > 0 && (
+              {/* Бейдж непрочитанных уведомлений */}
+              {tab.id === 'profile' && unreadCount > 0 && (
                 <div style={styles.badge}>{unreadCount}</div>
               )}
             </div>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import BottomNav from './components/BottomNav'
 import FeedPage from './pages/FeedPage'
 import CreateOrderPage from './pages/CreateOrderPage'
+import ProfilePage from './pages/ProfilePage'
 import { profileAPI, notificationsAPI, walletAPI } from './utils/api'
 import { useStore } from './store/useStore'
 
@@ -88,6 +89,9 @@ export default function App() {
             <div style={{ color: '#555', marginTop: 12 }}>Уведомления</div>
           </div>
         )
+
+      case 'profile':
+        return <ProfilePage />
 
       default:
         return <FeedPage onOrderClick={(order) => navigate('order-detail', order)} />

@@ -17,6 +17,7 @@ import paymentsRouter     from './routes/payments.js'
 import profileRouter      from './routes/profile.js'
 import notificationsRouter from './routes/notifications.js'
 import botRouter           from './routes/bot.js'
+import supportRouter       from './routes/support.js'
 
 const app = express()
 
@@ -50,6 +51,7 @@ app.use('/api/wallet',        walletRouter)
 app.use('/api/payments',      paymentsRouter)
 app.use('/api/profile',       profileRouter)
 app.use('/api/notifications', notificationsRouter)
+app.use('/api/support',       supportRouter)
 
 // ── Health check ──────────────────────────────────────
 app.get('/health', async (req, res) => {

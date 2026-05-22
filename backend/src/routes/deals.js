@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { db } from '../config/database.js'
 import { lockEscrow, releaseEscrow, refundEscrow } from '../services/escrow.js'
+import { notifyAdmin } from '../services/adminNotify.js'
 
 const router = Router()
 
@@ -198,6 +199,18 @@ router.post('/:id/dispute', async (req, res, next) => {
         JSON.stringify({ deal_id: parseInt(dealId) }),
       ]
     )
+
+    // Уведомляем администратора о споре
+    const { rows: users } = await db.query(
+      `SELECT id, username, first_name FROM users WHERE id = ANY($1)`,
+      [[deal.client_id, deal.freelancer_id]]
+    )
+    const fmt = (u) => u?.username ? `@${u.username}` : u?.first_name || '?'
+    const client     = users.find(u => u.id === deal.client_id)
+    const freelancer = users.find(u => u.id === deal.freelancer_id)
+    notifyAdmin(
+      `⚠️ Спор в сделке #${dealId} между ${fmt(client)} и ${fmt(freelancer)}\nПричина: ${reason || '—'}\nДля возврата: /refund ${dealId}`
+    ).catch(() => {})
 
     res.json({ success: true, status: 'disputed' })
   } catch (err) {
