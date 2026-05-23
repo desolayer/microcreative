@@ -247,14 +247,17 @@ export default function OrderDetailPage({ orderId, onBack }) {
             </div>
           </div>
         ) : isOwn ? (
-          /* Владелец: инфо + кнопка удаления */
+          /* Владелец: кнопка откликов + удаление */
           <>
-            <div style={s.ownNote}>
-              <i className="ti ti-info-circle" style={{ fontSize: 15, marginRight: 6 }} />
-              Это ваш заказ · {order.responses_count || 0} откликов
-            </div>
             <button
-              style={s.deleteBtn}
+              style={s.primaryBtn}
+              onClick={() => { haptic('medium'); onBack('responses', order.id) }}
+            >
+              <i className="ti ti-users" style={{ fontSize: 16, marginRight: 8 }} />
+              Смотреть отклики · {order.responses_count || 0}
+            </button>
+            <button
+              style={{ ...s.deleteBtn, marginTop: 8 }}
               onClick={() => { haptic('medium'); setConfirmDelete(true) }}
             >
               🗑 Удалить заказ

@@ -1,4 +1,5 @@
 import './config/env.js'  // загружаем и валидируем переменные окружения
+import { createServer } from 'http'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -9,6 +10,7 @@ import { authMiddleware } from './middleware/auth.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { config } from './config/env.js'
 import { pool } from './config/database.js'
+import { setupWebSocket } from './services/websocket.js'
 
 import ordersRouter       from './routes/orders.js'
 import dealsRouter        from './routes/deals.js'
@@ -71,7 +73,10 @@ app.use((req, res) => {
 // ── Глобальный обработчик ошибок ─────────────────────
 app.use(errorHandler)
 
-app.listen(config.port, () => {
+const server = createServer(app)
+setupWebSocket(server)
+
+server.listen(config.port, () => {
   console.log(`MicroCreative backend running on port ${config.port}`)
   console.log(`Environment: ${config.nodeEnv}`)
 })

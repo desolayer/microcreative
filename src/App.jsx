@@ -4,6 +4,8 @@ import FeedPage from './pages/FeedPage'
 import CreateOrderPage from './pages/CreateOrderPage'
 import ProfilePage from './pages/ProfilePage'
 import OrderDetailPage from './pages/OrderDetailPage'
+import DealPage from './pages/DealPage'
+import ResponsesPage from './pages/ResponsesPage'
 import { profileAPI, notificationsAPI, walletAPI } from './utils/api'
 import { useStore } from './store/useStore'
 
@@ -54,9 +56,17 @@ export default function App() {
         return (
           <OrderDetailPage
             orderId={pageParams?.id}
-            onBack={(refresh = false) => {
-              if (refresh) setFeedKey(k => k + 1)
-              navigate('feed')
+            onBack={(actionOrRefresh = false, extraParam = null) => {
+              // actionOrRefresh can be:
+              //   true        → refresh feed and go back
+              //   'responses' → go to responses page (extraParam = orderId)
+              //   false       → go back to feed
+              if (actionOrRefresh === 'responses') {
+                navigate('responses', { orderId: extraParam })
+              } else {
+                if (actionOrRefresh === true) setFeedKey(k => k + 1)
+                navigate('feed')
+              }
             }}
           />
         )
@@ -66,6 +76,23 @@ export default function App() {
           <CreateOrderPage
             onBack={() => navigate('feed')}
             onSuccess={() => navigate('feed')}
+          />
+        )
+
+      case 'deal':
+        return (
+          <DealPage
+            dealId={pageParams?.id}
+            onBack={() => navigate('deals')}
+          />
+        )
+
+      case 'responses':
+        return (
+          <ResponsesPage
+            orderId={pageParams?.orderId}
+            onBack={() => navigate('feed')}
+            onDealCreated={(dealId) => navigate('deal', { id: dealId })}
           />
         )
 
@@ -101,7 +128,7 @@ export default function App() {
     }
   }
 
-  const hideNav = ['order-detail', 'deal', 'payment', 'respond', 'create'].includes(currentPage)
+  const hideNav = ['order-detail', 'deal', 'responses', 'payment', 'respond', 'create'].includes(currentPage)
 
   return (
     <div style={styles.app}>

@@ -53,7 +53,7 @@ export async function releaseEscrow(dealId) {
     )
     const deal = rows[0]
     if (!deal) throw Object.assign(new Error('Deal not found'), { status: 404 })
-    if (deal.status !== 'active') {
+    if (!['active', 'submitted'].includes(deal.status)) {
       throw Object.assign(new Error(`Cannot release escrow: deal is ${deal.status}`), { status: 400 })
     }
 

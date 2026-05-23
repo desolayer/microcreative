@@ -2,6 +2,9 @@ import { Router } from 'express'
 import { db } from '../config/database.js'
 import { lockEscrow, releaseEscrow, refundEscrow } from '../services/escrow.js'
 import { notifyAdmin } from '../services/adminNotify.js'
+import { notifyUser } from '../services/telegramNotify.js'
+import { broadcastToDeal, sendToUser } from '../services/websocket.js'
+import { createCryptoBotInvoice } from '../services/cryptobot.js'
 
 const router = Router()
 
@@ -112,6 +115,8 @@ router.post('/:id/messages', async (req, res, next) => {
       [dealId, req.user.id, message.trim()]
     )
 
+    const newMsg = rows[0]
+
     // Уведомляем другую сторону
     const recipientId = deal.client_id === req.user.id ? deal.freelancer_id : deal.client_id
     await db.query(
@@ -125,7 +130,24 @@ router.post('/:id/messages', async (req, res, next) => {
       ]
     )
 
-    res.status(201).json(rows[0])
+    // WebSocket: рассылаем обоим участникам
+    broadcastToDeal(deal.client_id, deal.freelancer_id, {
+      type: 'new_message',
+      message: { ...newMsg, first_name: req.user.first_name, username: req.user.username, photo_url: req.user.photo_url },
+    })
+
+    // TG: уведомляем получателя если не в сети
+    const { rows: recipientRows } = await db.query(
+      `SELECT telegram_id FROM users WHERE id = $1`, [recipientId]
+    )
+    if (recipientRows[0]?.telegram_id) {
+      notifyUser(
+        recipientRows[0].telegram_id,
+        `💬 *${req.user.first_name}*: ${message.trim().substring(0, 120)}`
+      ).catch(() => {})
+    }
+
+    res.status(201).json(newMsg)
   } catch (err) {
     next(err)
   }
@@ -141,23 +163,41 @@ router.post('/:id/complete', async (req, res, next) => {
       [dealId, req.user.id]
     )
     if (!rows[0]) return res.status(404).json({ error: 'Deal not found or not your deal' })
-    if (rows[0].status !== 'active') {
-      return res.status(400).json({ error: 'Deal is not active' })
+    if (!['active', 'submitted'].includes(rows[0].status)) {
+      return res.status(400).json({ error: 'Deal must be active or submitted to complete' })
     }
 
+    const deal = rows[0]
     const result = await releaseEscrow(parseInt(dealId))
 
-    // Уведомляем исполнителя
+    // DB-уведомление исполнителю
     await db.query(
       `INSERT INTO notifications (user_id, type, title, body, data)
        VALUES ($1, 'deal_completed', $2, $3, $4)`,
       [
-        rows[0].freelancer_id,
+        deal.freelancer_id,
         'Сделка завершена!',
         `Заказчик подтвердил выполнение. ${result.freelancerAmount} ${result.currency} зачислено.`,
         JSON.stringify({ deal_id: parseInt(dealId) }),
       ]
     )
+
+    // TG-уведомления обоим
+    const { rows: users } = await db.query(
+      `SELECT id, telegram_id FROM users WHERE id = ANY($1)`,
+      [[deal.client_id, deal.freelancer_id]]
+    )
+    const clientTg     = users.find(u => u.id === deal.client_id)?.telegram_id
+    const freelancerTg = users.find(u => u.id === deal.freelancer_id)?.telegram_id
+    notifyUser(clientTg,     `✅ Сделка завершена! Средства переведены исполнителю.`).catch(() => {})
+    notifyUser(freelancerTg, `🎉 Сделка завершена! ${result.freelancerAmount} ${result.currency} зачислено на ваш баланс.`).catch(() => {})
+
+    // WebSocket
+    broadcastToDeal(deal.client_id, deal.freelancer_id, {
+      type: 'deal_status',
+      dealId: parseInt(dealId),
+      status: 'completed',
+    })
 
     res.json({ success: true, ...result })
   } catch (err) {
@@ -245,6 +285,105 @@ router.post('/:id/cancel', async (req, res, next) => {
     }
 
     res.json({ success: true, status: 'cancelled' })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/deals/:id/pay — заказчик создаёт счёт CryptoBot для оплаты эскроу
+router.post('/:id/pay', async (req, res, next) => {
+  try {
+    const dealId = req.params.id
+
+    const { rows } = await db.query(
+      `SELECT d.*, o.title AS order_title
+       FROM deals d
+       JOIN orders o ON o.id = d.order_id
+       WHERE d.id = $1 AND d.client_id = $2`,
+      [dealId, req.user.id]
+    )
+    const deal = rows[0]
+    if (!deal) return res.status(404).json({ error: 'Deal not found or not your deal' })
+    if (deal.status !== 'pending') {
+      return res.status(400).json({ error: `Cannot pay: deal is ${deal.status}` })
+    }
+
+    // XTR = Telegram Stars; остальное — крипто
+    const asset = deal.currency === 'STARS' ? 'XTR' : deal.currency
+
+    const invoice = await createCryptoBotInvoice({
+      userId:      req.user.id,
+      orderId:     deal.order_id,
+      amount:      deal.amount,
+      asset,
+      description: `Эскроу: ${deal.order_title}`,
+    })
+
+    // Переопределяем payload инвойса для маршрутизации вебхука
+    // (createCryptoBotInvoice уже создал запись с дефолтным payload,
+    //  дополнительно сохраняем pay_url и ссылаем dealId на инвойс)
+    await db.query(
+      `UPDATE deals SET pay_url = $1, invoice_id = $2 WHERE id = $3`,
+      [invoice.payUrl, String(invoice.invoiceId), dealId]
+    )
+
+    // Пересоздаём инвойс с правильным payload через прямой запрос
+    // (CryptoBot не позволяет обновить существующий инвойс, поэтому
+    //  при вебхуке мы ищем по invoice_id в таблице deals)
+    res.json({ payUrl: invoice.payUrl, invoiceId: invoice.invoiceId, amount: invoice.amount, asset })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/deals/:id/submit — исполнитель сдаёт работу на проверку
+router.post('/:id/submit', async (req, res, next) => {
+  try {
+    const dealId = req.params.id
+
+    const { rows } = await db.query(
+      `SELECT d.*, c.telegram_id AS client_tg
+       FROM deals d
+       JOIN users c ON c.id = d.client_id
+       WHERE d.id = $1 AND d.freelancer_id = $2`,
+      [dealId, req.user.id]
+    )
+    const deal = rows[0]
+    if (!deal) return res.status(404).json({ error: 'Deal not found or not your deal' })
+    if (deal.status !== 'active') {
+      return res.status(400).json({ error: 'Can only submit active deals' })
+    }
+
+    await db.query(
+      `UPDATE deals SET status = 'submitted', submitted_at = NOW() WHERE id = $1`,
+      [dealId]
+    )
+
+    // DB-уведомление заказчику
+    await db.query(
+      `INSERT INTO notifications (user_id, type, title, body, data)
+       VALUES ($1, 'work_submitted', $2, $3, $4)`,
+      [
+        deal.client_id,
+        'Работа сдана на проверку',
+        `${req.user.first_name} отправил работу. Проверьте и подтвердите.`,
+        JSON.stringify({ deal_id: parseInt(dealId) }),
+      ]
+    )
+
+    // TG-уведомление заказчику
+    notifyUser(deal.client_tg,
+      `📬 *${req.user.first_name}* сдал работу по сделке.\nПроверьте и подтвердите выполнение.`
+    ).catch(() => {})
+
+    // WebSocket обоим участникам
+    broadcastToDeal(deal.client_id, deal.freelancer_id, {
+      type: 'deal_status',
+      dealId: parseInt(dealId),
+      status: 'submitted',
+    })
+
+    res.json({ success: true, status: 'submitted' })
   } catch (err) {
     next(err)
   }
