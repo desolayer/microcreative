@@ -23,6 +23,9 @@ import supportRouter       from './routes/support.js'
 
 const app = express()
 
+// Railway / Render / Vercel — за reverse proxy
+app.set('trust proxy', 1)
+
 // ── Базовые мидлвары ─────────────────────────────────
 app.use(helmet())
 app.use(cors({
