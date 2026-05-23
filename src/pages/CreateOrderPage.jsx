@@ -3,7 +3,7 @@ import { ordersAPI } from '../utils/api'
 import { useTelegram } from '../hooks/useTelegram'
 
 const CATEGORIES = ['Дизайн', 'Логотипы', 'Аватарки', 'Соцсети', 'Стикеры', 'Другое']
-const CURRENCIES = ['RUB', 'USDT', 'TON', 'STARS']
+const CURRENCIES = ['USDT', 'TON', 'STARS']
 const DEADLINES  = [1, 2, 3, 5, 7, 14, 30]
 
 const CURRENCY_LABEL = { RUB: '₽', USDT: '$', TON: 'TON', STARS: '⭐' }
@@ -19,7 +19,7 @@ export default function CreateOrderPage({ onBack, onSuccess }) {
     title:        '',
     description:  '',
     budget:       '',
-    currency:     'RUB',
+    currency:     'USDT',
     deadline_days: 3,
   })
 
