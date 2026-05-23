@@ -65,7 +65,7 @@ export default function OrderDetailPage({ orderId, onBack }) {
     setDeleteError('')
     try {
       await ordersAPI.deleteOrder(orderId)
-      onBack()
+      onBack(true) // true = force refresh feed
     } catch (e) {
       setDeleteError(e?.response?.data?.error || 'Не удалось удалить заказ')
       setConfirmDelete(false)

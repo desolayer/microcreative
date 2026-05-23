@@ -9,7 +9,8 @@ import { useStore } from './store/useStore'
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('feed')
-  const [pageParams, setPageParams] = useState(null)
+  const [pageParams, setPageParams]   = useState(null)
+  const [feedKey, setFeedKey]         = useState(0)   // инкремент → FeedPage перемонтируется
   const { setUser, setBalance, setUnreadCount } = useStore()
 
   // Инициализация: загружаем профиль, баланс, счётчик уведомлений
@@ -47,13 +48,16 @@ export default function App() {
   const renderPage = () => {
     switch (currentPage) {
       case 'feed':
-        return <FeedPage onOrderClick={(order) => navigate('order-detail', order)} />
+        return <FeedPage key={feedKey} onOrderClick={(order) => navigate('order-detail', order)} />
 
       case 'order-detail':
         return (
           <OrderDetailPage
             orderId={pageParams?.id}
-            onBack={() => navigate('feed')}
+            onBack={(refresh = false) => {
+              if (refresh) setFeedKey(k => k + 1)
+              navigate('feed')
+            }}
           />
         )
 
