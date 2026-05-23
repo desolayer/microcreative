@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { db } from '../config/database.js'
+import { config } from '../config/env.js'
 
 const router = Router()
 
@@ -15,7 +16,9 @@ router.get('/me', async (req, res, next) => {
        FROM users WHERE id = $1`,
       [req.user.id]
     )
-    res.json(rows[0])
+    const isAdmin = config.adminTelegramId &&
+      parseInt(rows[0].telegram_id) === parseInt(config.adminTelegramId)
+    res.json({ ...rows[0], is_admin: !!isAdmin })
   } catch (err) {
     next(err)
   }

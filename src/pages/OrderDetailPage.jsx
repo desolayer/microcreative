@@ -40,13 +40,16 @@ function timeAgo(dateStr) {
 
 // ── Основной компонент ───────────────────────────────────
 export default function OrderDetailPage({ orderId, onBack }) {
-  const { user }  = useStore()
+  const { user }   = useStore()
   const { haptic } = useTelegram()
 
-  const [order,   setOrder]   = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState(null)
-  const [view,    setView]    = useState('detail') // 'detail' | 'respond' | 'success'
+  const [order,         setOrder]         = useState(null)
+  const [loading,       setLoading]       = useState(true)
+  const [error,         setError]         = useState(null)
+  const [view,          setView]          = useState('detail') // 'detail' | 'respond' | 'success'
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting,      setDeleting]      = useState(false)
+  const [deleteError,   setDeleteError]   = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -55,6 +58,21 @@ export default function OrderDetailPage({ orderId, onBack }) {
       .catch(() => setError('Не удалось загрузить заказ'))
       .finally(() => setLoading(false))
   }, [orderId])
+
+  const handleDelete = async () => {
+    haptic('heavy')
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await ordersAPI.deleteOrder(orderId)
+      onBack()
+    } catch (e) {
+      setDeleteError(e?.response?.data?.error || 'Не удалось удалить заказ')
+      setConfirmDelete(false)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   // ── Загрузка / ошибка ───────────────────────────────
   if (loading) return (
@@ -77,7 +95,8 @@ export default function OrderDetailPage({ orderId, onBack }) {
     </div>
   )
 
-  const isOwn = user && order.author_id === user.id
+  const isOwn   = user && order.author_id === user.id
+  const isAdmin = user?.is_admin === true
 
   if (view === 'respond') return (
     <RespondView
@@ -196,19 +215,62 @@ export default function OrderDetailPage({ orderId, onBack }) {
           </div>
         </div>
 
-        <div style={{ height: 100 }} />
+        <div style={{ height: 110 }} />
       </div>
 
-      {/* Нижняя кнопка */}
+      {/* Нижняя панель */}
       <div style={s.footer}>
-        {isOwn ? (
-          <div style={s.ownNote}>
-            <i className="ti ti-info-circle" style={{ fontSize: 16, marginRight: 8 }} />
-            Это ваш заказ · {order.responses_count || 0} откликов
+        {deleteError && (
+          <div style={s.deleteError}>{deleteError}</div>
+        )}
+
+        {/* Подтверждение удаления */}
+        {confirmDelete ? (
+          <div style={s.confirmBox}>
+            <div style={s.confirmText}>
+              Вы уверены? Это действие нельзя отменить.
+            </div>
+            <div style={s.confirmBtns}>
+              <button
+                style={s.cancelBtn}
+                onClick={() => { haptic('light'); setConfirmDelete(false) }}
+              >
+                Отмена
+              </button>
+              <button
+                style={{ ...s.deleteBtn, opacity: deleting ? 0.5 : 1 }}
+                disabled={deleting}
+                onClick={handleDelete}
+              >
+                {deleting ? 'Удаляю...' : 'Да, удалить'}
+              </button>
+            </div>
           </div>
+        ) : isOwn ? (
+          /* Владелец: инфо + кнопка удаления */
+          <>
+            <div style={s.ownNote}>
+              <i className="ti ti-info-circle" style={{ fontSize: 15, marginRight: 6 }} />
+              Это ваш заказ · {order.responses_count || 0} откликов
+            </div>
+            <button
+              style={s.deleteBtn}
+              onClick={() => { haptic('medium'); setConfirmDelete(true) }}
+            >
+              🗑 Удалить заказ
+            </button>
+          </>
+        ) : isAdmin && order.status !== 'cancelled' ? (
+          /* Только для чужих заказов — кнопка модератора */
+          <button
+            style={s.adminDeleteBtn}
+            onClick={() => { haptic('medium'); setConfirmDelete(true) }}
+          >
+            ⚠️ Удалить заказ (админ)
+          </button>
         ) : order.status !== 'open' ? (
           <div style={s.ownNote}>
-            <i className="ti ti-lock" style={{ fontSize: 16, marginRight: 8 }} />
+            <i className="ti ti-lock" style={{ fontSize: 15, marginRight: 6 }} />
             Заказ уже закрыт
           </div>
         ) : (
@@ -472,6 +534,31 @@ const s = {
 
   successTitle: { fontSize: 18, fontWeight: 500, color: '#e5e5e5', marginTop: 16 },
   successSub:   { fontSize: 14, color: '#555', marginTop: 8, marginBottom: 24, lineHeight: 1.5 },
+
+  deleteError: { color: '#f87171', fontSize: 13, textAlign: 'center', marginBottom: 8 },
+  deleteBtn: {
+    width: '100%', padding: '13px', borderRadius: 14,
+    background: '#2a1010', border: '0.5px solid #5a1a1a',
+    color: '#f87171', fontSize: 14, fontWeight: 500, cursor: 'pointer',
+    fontFamily: 'inherit', marginTop: 8,
+  },
+  adminDeleteBtn: {
+    width: '100%', padding: '13px', borderRadius: 14,
+    background: '#1e1510', border: '0.5px solid #5a3a10',
+    color: '#f59e0b', fontSize: 14, fontWeight: 500, cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  confirmBox: {
+    background: '#1a1a1a', border: '0.5px solid #3a1a1a',
+    borderRadius: 14, padding: '14px 16px',
+  },
+  confirmText: { fontSize: 13, color: '#aaa', marginBottom: 12, textAlign: 'center' },
+  confirmBtns: { display: 'flex', gap: 10 },
+  cancelBtn: {
+    flex: 1, padding: '12px', borderRadius: 12,
+    background: '#222', border: '0.5px solid #333',
+    color: '#aaa', fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
+  },
 
   // Форма отклика
   orderSnippet: {

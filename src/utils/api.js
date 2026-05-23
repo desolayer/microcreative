@@ -18,6 +18,7 @@ export const ordersAPI = {
   getResponses: (orderId) => api.get(`/orders/${orderId}/responses`),
   acceptResponse: (orderId, responseId) =>
     api.post(`/orders/${orderId}/responses/${responseId}/accept`),
+  deleteOrder: (id) => api.delete(`/orders/${id}`),
 }
 
 export const dealsAPI = {

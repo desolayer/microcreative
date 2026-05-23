@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { db } from '../config/database.js'
 import { notifyAdmin } from '../services/adminNotify.js'
+import { config } from '../config/env.js'
 
 const router = Router()
 
@@ -227,6 +228,55 @@ router.post('/:id/responses/:responseId/accept', async (req, res, next) => {
 
       res.status(201).json(deal)
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// DELETE /api/orders/:id — удалить заказ (владелец или админ)
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const orderId = req.params.id
+    const isAdmin = config.adminTelegramId &&
+      parseInt(req.user.telegram_id) === parseInt(config.adminTelegramId)
+
+    // Получаем заказ
+    const { rows: orderRows } = await db.query(
+      `SELECT o.*, u.username, u.first_name FROM orders o
+       JOIN users u ON u.id = o.author_id
+       WHERE o.id = $1`,
+      [orderId]
+    )
+    const order = orderRows[0]
+    if (!order) return res.status(404).json({ error: 'Order not found' })
+
+    // Проверяем права
+    if (order.author_id !== req.user.id && !isAdmin) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    // Нельзя удалять заказ с активной сделкой
+    const { rows: dealRows } = await db.query(
+      `SELECT id FROM deals WHERE order_id = $1 AND status IN ('pending', 'active', 'disputed')`,
+      [orderId]
+    )
+    if (dealRows.length > 0) {
+      return res.status(400).json({ error: 'Нельзя удалить заказ с активной сделкой' })
+    }
+
+    // Удаляем (мягко — меняем статус)
+    await db.query(
+      `UPDATE orders SET status = 'cancelled' WHERE id = $1`,
+      [orderId]
+    )
+
+    // Уведомляем администратора
+    const who = order.username ? `@${order.username}` : order.first_name
+    notifyAdmin(
+      `🗑 Заказ удалён\nПользователь: ${who}\nЗаказ: ${order.title}`
+    ).catch(() => {})
+
+    res.json({ success: true })
   } catch (err) {
     next(err)
   }
