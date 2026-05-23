@@ -104,8 +104,8 @@ router.post('/:id/messages', async (req, res, next) => {
     )
     const deal = dealRows[0]
     if (!deal) return res.status(404).json({ error: 'Deal not found' })
-    if (!['active', 'disputed'].includes(deal.status)) {
-      return res.status(400).json({ error: 'Cannot send messages in this deal status' })
+    if (['completed', 'cancelled'].includes(deal.status)) {
+      return res.status(400).json({ error: 'Cannot send messages in a closed deal' })
     }
 
     const { rows } = await db.query(
@@ -308,8 +308,12 @@ router.post('/:id/pay', async (req, res, next) => {
       return res.status(400).json({ error: `Cannot pay: deal is ${deal.status}` })
     }
 
-    // XTR = Telegram Stars; остальное — крипто
-    const asset = deal.currency === 'STARS' ? 'XTR' : deal.currency
+    // Выбранная валюта из запроса (bottomsheet), иначе — берём из сделки
+    const SUPPORTED = ['TON', 'USDT', 'BTC', 'ETH', 'LTC', 'BNB', 'TRX', 'USDC', 'XTR']
+    const requestedAsset = req.body.asset
+    const asset = SUPPORTED.includes(requestedAsset)
+      ? requestedAsset
+      : (deal.currency === 'STARS' ? 'XTR' : deal.currency)
 
     const invoice = await createCryptoBotInvoice({
       userId:      req.user.id,

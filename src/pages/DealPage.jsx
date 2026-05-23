@@ -27,46 +27,67 @@ const STATUS_COLOR = {
 const STEPS = ['pending', 'active', 'submitted', 'completed']
 const STEP_LABELS = ['Создана', 'В работе', 'На проверке', 'Завершена']
 
+const PAY_CURRENCIES = [
+  { asset: 'USDT',  label: 'USDT',           icon: '💵' },
+  { asset: 'TON',   label: 'TON',            icon: '💎' },
+  { asset: 'BTC',   label: 'Bitcoin',        icon: '₿'  },
+  { asset: 'XTR',   label: 'Telegram Stars', icon: '⭐' },
+]
+
 export default function DealPage({ dealId, onBack }) {
   const { user } = useStore()
-  const [deal, setDeal]           = useState(null)
-  const [messages, setMessages]   = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [text, setText]           = useState('')
-  const [sending, setSending]     = useState(false)
-  const [paying, setPaying]       = useState(false)
+  const [deal, setDeal]             = useState(null)
+  const [messages, setMessages]     = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [loadError, setLoadError]   = useState(null)
+  const [text, setText]             = useState('')
+  const [sending, setSending]       = useState(false)
   const [completing, setCompleting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError]         = useState(null)
+  const [actionError, setActionError] = useState(null)
+  // Currency picker sheet
+  const [showPaySheet, setShowPaySheet] = useState(false)
+  const [paying, setPaying]             = useState(false)
+  const [payError, setPayError]         = useState(null)
+
   const bottomRef = useRef(null)
   const wsRef     = useRef(null)
 
+  // ── Load deal + messages separately so one failing doesn't block the other ──
   const loadDeal = useCallback(async () => {
+    if (!dealId) {
+      setLoadError('Некорректный ID сделки')
+      setLoading(false)
+      return
+    }
     try {
-      const [dealRes, msgRes] = await Promise.all([
-        dealsAPI.getOne(dealId),
-        dealsAPI.getMessages(dealId),
-      ])
+      const dealRes = await dealsAPI.getOne(dealId)
       setDeal(dealRes.data)
+    } catch (e) {
+      setLoadError(e.response?.data?.error || 'Не удалось загрузить сделку')
+      setLoading(false)
+      return
+    }
+    // Messages load separately — failure doesn't block the page
+    try {
+      const msgRes = await dealsAPI.getMessages(dealId)
       setMessages(msgRes.data)
     } catch {
-      setError('Не удалось загрузить сделку')
-    } finally {
-      setLoading(false)
+      // Non-critical — page still works with empty messages
     }
+    setLoading(false)
   }, [dealId])
 
   useEffect(() => { loadDeal() }, [loadDeal])
 
-  // WebSocket connection
+  // ── WebSocket ──
   useEffect(() => {
+    if (!dealId) return
     const initData = window.Telegram?.WebApp?.initData || ''
     const ws = new WebSocket(WS_URL)
     wsRef.current = ws
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'auth', initData }))
-    }
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', initData }))
 
     ws.onmessage = (e) => {
       try {
@@ -85,98 +106,106 @@ export default function DealPage({ dealId, onBack }) {
     return () => ws.close()
   }, [dealId])
 
-  // Auto-scroll to bottom on new messages
+  // ── Auto-scroll ──
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // ── Send message ──
   const sendMessage = async () => {
     if (!text.trim() || sending) return
     setSending(true)
-    setError(null)
+    setActionError(null)
     try {
       const res = await dealsAPI.sendMessage(dealId, text.trim())
       setMessages(prev =>
         prev.some(m => m.id === res.data.id) ? prev : [...prev, res.data]
       )
       setText('')
-    } catch {
-      setError('Ошибка отправки — попробуйте снова')
+    } catch (e) {
+      setActionError(e.response?.data?.error || 'Ошибка отправки — попробуйте снова')
     } finally {
       setSending(false)
     }
   }
 
-  const handlePay = async () => {
+  // ── Pay with selected currency ──
+  const handlePay = async (asset) => {
+    setShowPaySheet(false)
     setPaying(true)
-    setError(null)
+    setPayError(null)
     try {
-      const res = await dealsAPI.pay(dealId)
-      if (res.data.payUrl) {
-        // Open CryptoBot pay link inside Telegram
+      const res = await dealsAPI.pay(dealId, asset)
+      const url = res.data.payUrl
+      if (url) {
         if (window.Telegram?.WebApp?.openLink) {
-          window.Telegram.WebApp.openLink(res.data.payUrl)
+          window.Telegram.WebApp.openLink(url)
         } else {
-          window.open(res.data.payUrl, '_blank')
+          window.open(url, '_blank')
         }
       }
     } catch (e) {
-      setError(e.response?.data?.error || 'Ошибка создания счёта')
+      setPayError(e.response?.data?.error || 'Ошибка создания счёта')
     } finally {
       setPaying(false)
     }
   }
 
+  // ── Submit work ──
   const handleSubmit = async () => {
     setSubmitting(true)
-    setError(null)
+    setActionError(null)
     try {
       await dealsAPI.submit(dealId)
       setDeal(prev => ({ ...prev, status: 'submitted' }))
     } catch (e) {
-      setError(e.response?.data?.error || 'Ошибка')
+      setActionError(e.response?.data?.error || 'Ошибка')
     } finally {
       setSubmitting(false)
     }
   }
 
+  // ── Complete deal ──
   const handleComplete = async () => {
     setCompleting(true)
-    setError(null)
+    setActionError(null)
     try {
       await dealsAPI.complete(dealId)
       setDeal(prev => ({ ...prev, status: 'completed' }))
     } catch (e) {
-      setError(e.response?.data?.error || 'Ошибка')
+      setActionError(e.response?.data?.error || 'Ошибка')
     } finally {
       setCompleting(false)
     }
   }
 
-  // ── Loading ──────────────────────────────────────────
+  // ── States ──────────────────────────────────────────
   if (loading) return (
     <div style={{ ...st.page, alignItems: 'center', justifyContent: 'center' }}>
       <div style={st.spinner} />
     </div>
   )
 
-  if (!deal) return (
+  if (loadError || !deal) return (
     <div style={st.page}>
       <div style={st.header}>
         <button onClick={onBack} style={st.backBtn}>←</button>
         <span style={st.headerTitle}>Сделка</span>
       </div>
-      <div style={{ padding: 24, color: '#ef4444', fontSize: 14 }}>{error || 'Сделка не найдена'}</div>
+      <div style={{ padding: 24, color: '#ef4444', fontSize: 14 }}>
+        {loadError || 'Сделка не найдена'}
+      </div>
     </div>
   )
 
   const isClient     = user && deal.client_id === user.id
   const isFreelancer = user && deal.freelancer_id === user.id
-  const canChat      = ['active', 'submitted', 'disputed'].includes(deal.status)
+  // Chat is open for all non-terminal statuses
+  const canChat      = !['completed', 'cancelled'].includes(deal.status)
 
   const otherUser = isClient
-    ? { name: deal.freelancer_first_name, username: deal.freelancer_username, photo: deal.freelancer_photo }
-    : { name: deal.client_first_name,     username: deal.client_username,     photo: deal.client_photo }
+    ? { name: deal.freelancer_first_name, username: deal.freelancer_username }
+    : { name: deal.client_first_name,     username: deal.client_username }
 
   const currentStepIdx = STEPS.indexOf(deal.status)
 
@@ -187,7 +216,7 @@ export default function DealPage({ dealId, onBack }) {
         <button onClick={onBack} style={st.backBtn}>←</button>
         <div style={st.headerInfo}>
           <div style={st.headerName}>{otherUser.name || otherUser.username || '—'}</div>
-          <div style={st.headerOrder} title={deal.order_title}>{deal.order_title}</div>
+          <div style={st.headerOrder}>{deal.order_title}</div>
         </div>
         <div style={{
           ...st.statusChip,
@@ -212,7 +241,9 @@ export default function DealPage({ dealId, onBack }) {
             const active = s === deal.status
             return (
               <div key={s} style={st.stepWrap}>
-                {i > 0 && <div style={{ ...st.stepLine, background: i <= currentStepIdx ? '#a78bfa' : '#2a2a2a' }} />}
+                {i > 0 && (
+                  <div style={{ ...st.stepLine, background: i <= currentStepIdx ? '#a78bfa' : '#2a2a2a' }} />
+                )}
                 <div style={{
                   ...st.stepDot,
                   background: done || active ? '#a78bfa' : '#2a2a2a',
@@ -226,9 +257,16 @@ export default function DealPage({ dealId, onBack }) {
           })}
         </div>
 
+        {/* Pay error */}
+        {payError && <p style={st.payError}>{payError}</p>}
+
         {/* Action buttons */}
         {isClient && deal.status === 'pending' && (
-          <button onClick={handlePay} disabled={paying} style={st.payBtn}>
+          <button
+            onClick={() => { setPayError(null); setShowPaySheet(true) }}
+            disabled={paying}
+            style={st.payBtn}
+          >
             {paying ? 'Создаём счёт...' : `💳 Оплатить ${deal.amount} ${deal.currency}`}
           </button>
         )}
@@ -256,21 +294,14 @@ export default function DealPage({ dealId, onBack }) {
         )}
       </div>
 
-      {error && <p style={st.errorNote}>{error}</p>}
+      {/* Action error (send / submit / complete) */}
+      {actionError && <p style={st.actionError}>{actionError}</p>}
 
       {/* ── Messages ── */}
       <div style={st.messages}>
-        {!canChat && messages.length === 0 ? (
-          <div style={st.chatLocked}>
-            <i className="ti ti-lock" style={{ fontSize: 28, color: '#333' }} />
-            <p style={{ color: '#444', margin: '8px 0 0', fontSize: 13 }}>
-              Чат откроется после оплаты
-            </p>
-          </div>
-        ) : messages.length === 0 ? (
+        {messages.length === 0 && (
           <p style={st.noMsgs}>Напишите первое сообщение 👋</p>
-        ) : null}
-
+        )}
         {messages.map(msg => {
           const mine = msg.sender_id === user?.id
           return (
@@ -285,7 +316,7 @@ export default function DealPage({ dealId, onBack }) {
         <div ref={bottomRef} />
       </div>
 
-      {/* ── Input ── */}
+      {/* ── Input (available for all non-terminal statuses) ── */}
       {canChat && (
         <div style={st.inputArea}>
           <input
@@ -303,6 +334,35 @@ export default function DealPage({ dealId, onBack }) {
           >
             <i className="ti ti-send" style={{ fontSize: 16 }} />
           </button>
+        </div>
+      )}
+
+      {/* ── Currency picker bottomsheet ── */}
+      {showPaySheet && (
+        <div style={st.overlay} onClick={() => setShowPaySheet(false)}>
+          <div style={st.sheet} onClick={e => e.stopPropagation()}>
+            <div style={st.sheetHandle} />
+            <div style={st.sheetTitle}>Выберите валюту оплаты</div>
+            <div style={st.sheetSubtitle}>
+              Сумма к оплате: <strong style={{ color: '#a78bfa' }}>{deal.amount} {deal.currency}</strong>
+            </div>
+            <div style={st.currencyList}>
+              {PAY_CURRENCIES.map(({ asset, label, icon }) => (
+                <button
+                  key={asset}
+                  onClick={() => handlePay(asset)}
+                  style={st.currencyBtn}
+                >
+                  <span style={st.currencyIcon}>{icon}</span>
+                  <span style={st.currencyLabel}>{label}</span>
+                  <i className="ti ti-chevron-right" style={{ color: '#555', fontSize: 16, marginLeft: 'auto' }} />
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowPaySheet(false)} style={st.cancelSheetBtn}>
+              Отмена
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -336,7 +396,7 @@ const st = {
     fontSize: 22, cursor: 'pointer', padding: '4px 8px',
     fontFamily: 'inherit', flexShrink: 0,
   },
-  headerInfo: { flex: 1, minWidth: 0 },
+  headerInfo:  { flex: 1, minWidth: 0 },
   headerName: {
     fontWeight: 600, fontSize: 15, color: '#e5e5e5',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -362,10 +422,10 @@ const st = {
   escrowAmount: { fontSize: 18, fontWeight: 700, color: '#a78bfa' },
 
   // Steps
-  stepsRow: { display: 'flex', alignItems: 'flex-start', marginBottom: 12 },
-  stepWrap: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' },
-  stepDot:  { width: 10, height: 10, borderRadius: '50%', marginBottom: 5, zIndex: 1, transition: 'all 0.3s' },
-  stepLine: {
+  stepsRow:  { display: 'flex', alignItems: 'flex-start', marginBottom: 12 },
+  stepWrap:  { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' },
+  stepDot:   { width: 10, height: 10, borderRadius: '50%', marginBottom: 5, zIndex: 1, transition: 'all 0.3s' },
+  stepLine:  {
     position: 'absolute', top: 4, right: '50%', width: '100%', height: 2,
     transition: 'background 0.3s',
   },
@@ -387,19 +447,16 @@ const st = {
     borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
   },
   waitNote: { textAlign: 'center', color: '#666', fontSize: 13, margin: '8px 0 0' },
+  payError: { color: '#ef4444', fontSize: 13, margin: '8px 0 0', textAlign: 'center' },
 
-  errorNote: { color: '#ef4444', fontSize: 13, padding: '4px 16px', margin: 0, flexShrink: 0 },
+  actionError: { color: '#ef4444', fontSize: 13, padding: '4px 16px', margin: 0, flexShrink: 0 },
 
   // Messages
   messages: {
     flex: 1, padding: '8px 16px 16px', overflowY: 'auto',
     display: 'flex', flexDirection: 'column', gap: 6,
   },
-  chatLocked: {
-    display: 'flex', flexDirection: 'column', alignItems: 'center',
-    justifyContent: 'center', flex: 1, padding: 40,
-  },
-  noMsgs: { textAlign: 'center', color: '#444', fontSize: 13, marginTop: 20 },
+  noMsgs:  { textAlign: 'center', color: '#444', fontSize: 13, marginTop: 20 },
   msgRow:  { display: 'flex' },
   bubble: {
     maxWidth: '78%', padding: '8px 12px', borderRadius: 16,
@@ -418,13 +475,55 @@ const st = {
   input: {
     flex: 1, padding: '10px 14px',
     background: '#1e1e1e', border: '0.5px solid #2a2a2a',
-    borderRadius: 22, color: '#e5e5e5', fontSize: 14, fontFamily: 'inherit',
-    outline: 'none',
+    borderRadius: 22, color: '#e5e5e5', fontSize: 14, fontFamily: 'inherit', outline: 'none',
   },
   sendBtn: {
     width: 42, height: 42, borderRadius: '50%',
     background: '#a78bfa', border: 'none', color: '#0f0f0f',
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     flexShrink: 0, transition: 'opacity 0.2s',
+  },
+
+  // Currency picker bottomsheet
+  overlay: {
+    position: 'fixed', inset: 0, background: '#000000aa',
+    display: 'flex', alignItems: 'flex-end', zIndex: 100,
+  },
+  sheet: {
+    width: '100%', maxWidth: 480, margin: '0 auto',
+    background: '#1a1a1a', borderRadius: '20px 20px 0 0',
+    padding: '12px 0 24px',
+    display: 'flex', flexDirection: 'column',
+  },
+  sheetHandle: {
+    width: 36, height: 4, background: '#333', borderRadius: 2,
+    margin: '0 auto 16px',
+  },
+  sheetTitle: {
+    fontSize: 17, fontWeight: 700, color: '#e5e5e5',
+    padding: '0 20px', marginBottom: 6,
+  },
+  sheetSubtitle: {
+    fontSize: 13, color: '#888',
+    padding: '0 20px', marginBottom: 16,
+  },
+  currencyList: {
+    display: 'flex', flexDirection: 'column',
+    borderTop: '0.5px solid #2a2a2a',
+  },
+  currencyBtn: {
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: '14px 20px', background: 'none', border: 'none',
+    borderBottom: '0.5px solid #222', cursor: 'pointer',
+    fontFamily: 'inherit', color: '#e5e5e5',
+    transition: 'background 0.15s',
+  },
+  currencyIcon:  { fontSize: 22, width: 28, textAlign: 'center' },
+  currencyLabel: { fontSize: 16, fontWeight: 500, flex: 1, textAlign: 'left' },
+  cancelSheetBtn: {
+    margin: '12px 20px 0',
+    padding: '12px', background: '#252525',
+    border: '0.5px solid #2a2a2a', borderRadius: 12,
+    color: '#888', fontSize: 15, cursor: 'pointer', fontFamily: 'inherit',
   },
 }
