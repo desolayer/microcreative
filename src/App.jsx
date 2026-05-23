@@ -3,6 +3,7 @@ import BottomNav from './components/BottomNav'
 import FeedPage from './pages/FeedPage'
 import CreateOrderPage from './pages/CreateOrderPage'
 import ProfilePage from './pages/ProfilePage'
+import OrderDetailPage from './pages/OrderDetailPage'
 import { profileAPI, notificationsAPI, walletAPI } from './utils/api'
 import { useStore } from './store/useStore'
 
@@ -50,12 +51,10 @@ export default function App() {
 
       case 'order-detail':
         return (
-          <div style={styles.placeholder}>
-            <i className="ti ti-file-text" style={{ fontSize: 48, color: '#333' }} />
-            <div style={{ color: '#555', marginTop: 12 }}>Детали заказа</div>
-            <div style={{ color: '#333', fontSize: 12, marginTop: 4 }}>{pageParams?.title}</div>
-            <button style={styles.backBtn} onClick={() => navigate('feed')}>← Назад</button>
-          </div>
+          <OrderDetailPage
+            orderId={pageParams?.id}
+            onBack={() => navigate('feed')}
+          />
         )
 
       case 'create':
