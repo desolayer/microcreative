@@ -18,6 +18,7 @@ export default function App() {
   const [pageParams, setPageParams]       = useState(null)
   const [feedKey, setFeedKey]             = useState(0)   // инкремент → FeedPage перемонтируется
   const [maintenance, setMaintenance]     = useState(false)
+  const [banInfo, setBanInfo]             = useState(null)
   const { setUser, setBalance, setUnreadCount } = useStore()
 
   // Инициализация: загружаем статус + профиль, баланс, счётчик уведомлений
@@ -29,7 +30,14 @@ export default function App() {
 
     profileAPI.getMe()
       .then(r => setUser(r.data))
-      .catch(() => {}) // dev-режим без Telegram — не критично
+      .catch(e => {
+        // Проверяем статус бана (403 с ban-info)
+        const d = e?.response?.data
+        if (e?.response?.status === 403 && d && d.is_permanent !== undefined) {
+          setBanInfo(d)
+        }
+        // dev-режим без Telegram — остальное не критично
+      })
 
     walletAPI.getBalance()
       .then(r => {
@@ -132,6 +140,45 @@ export default function App() {
   }
 
   const hideNav = ['order-detail', 'deal', 'responses', 'payment', 'respond', 'create', 'notifications'].includes(currentPage)
+
+  // Бан — показываем заглушку
+  if (banInfo) {
+    const isPermanent = banInfo.is_permanent
+    const banDate = banInfo.banned_until
+      ? new Date(banInfo.banned_until).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })
+      : null
+    return (
+      <div style={{
+        minHeight: '100vh', background: '#0f0f0f', display: 'flex',
+        flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        color: '#e5e5e5', textAlign: 'center', padding: 32,
+      }}>
+        <div style={{ fontSize: 56 }}>{isPermanent ? '🚫' : '⏳'}</div>
+        <div style={{ fontSize: 22, fontWeight: 700, marginTop: 16, marginBottom: 8 }}>
+          {isPermanent ? 'Аккаунт заблокирован' : 'Временная блокировка'}
+        </div>
+        {isPermanent ? (
+          <>
+            {banInfo.ban_reason && (
+              <div style={{ fontSize: 14, color: '#888', marginBottom: 8 }}>{banInfo.ban_reason}</div>
+            )}
+            <div style={{ fontSize: 13, color: '#555', marginTop: 4 }}>
+              Обратитесь в поддержку: @microcreative_bot
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, color: '#888', marginBottom: 4 }}>
+              Ваш аккаунт заблокирован до <strong>{banDate}</strong>
+            </div>
+            {banInfo.ban_reason && (
+              <div style={{ fontSize: 13, color: '#555' }}>Причина: {banInfo.ban_reason}</div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
 
   // Режим обслуживания — показываем заглушку
   if (maintenance) {

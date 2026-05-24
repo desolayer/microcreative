@@ -47,6 +47,49 @@ router.post('/webhook', async (req, res) => {
   const text   = message.text.trim()
   const uname  = message.from.username || 'N/A'
 
+  // ── Проверяем статус бана пользователя ────────────
+  const { rows: dbRows } = await db.query(
+    `SELECT is_banned, banned_until, ban_reason FROM users WHERE telegram_id = $1`,
+    [fromId]
+  ).catch(() => ({ rows: [] }))
+  const dbUser = dbRows[0]
+
+  if (dbUser) {
+    // Авто-снятие истёкшего временного бана
+    if (dbUser.banned_until && new Date(dbUser.banned_until) <= new Date()) {
+      await db.query(
+        `UPDATE users SET banned_until = NULL, ban_reason = NULL WHERE telegram_id = $1`,
+        [fromId]
+      ).catch(() => {})
+      dbUser.banned_until = null
+      dbUser.ban_reason   = null
+    }
+
+    const isPermanent = dbUser.is_banned
+    const isTempBanned = dbUser.banned_until && new Date(dbUser.banned_until) > new Date()
+
+    if ((isPermanent || isTempBanned) && text.startsWith('/start')) {
+      if (isPermanent) {
+        await tg('sendMessage', {
+          chat_id: chatId,
+          text: `🚫 *Ваш аккаунт заблокирован навсегда.*\nПричина: ${dbUser.ban_reason || 'нарушение правил'}\n\nОбратитесь в поддержку: @microcreative_bot`,
+          parse_mode: 'Markdown',
+        })
+      } else {
+        const dt = new Date(dbUser.banned_until).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })
+        await tg('sendMessage', {
+          chat_id: chatId,
+          text: `⏳ *Временная блокировка*\nВаш аккаунт заблокирован до *${dt}*.\nПричина: ${dbUser.ban_reason || 'нарушение правил'}`,
+          parse_mode: 'Markdown',
+        })
+      }
+      return
+    }
+
+    // Все сообщения кроме /start — молча игнорируем
+    if (isPermanent || isTempBanned) return
+  }
+
   // /start
   if (text.startsWith('/start')) {
     console.log(`[BOT] /start id=${fromId} @${uname}`)
@@ -123,6 +166,19 @@ router.post('/webhook', async (req, res) => {
   if (text === '/categories')   { await sendCategories(chatId);                     return }
   if (text === '/duplicates')   { await sendDuplicates(chatId);                     return }
   if (text === '/complaints')   { await showComplaints(chatId);                     return }
+  if (text === '/warned')       { await sendWarned(chatId);                          return }
+
+  const warnMatch   = text.match(/^\/warn\s+@?(\w+)\s+([\s\S]+)/i)
+  if (warnMatch)     { await doWarn(chatId, fromId, warnMatch[1], warnMatch[2].trim());    return }
+
+  const warningsMatch = text.match(/^\/warnings\s+@?(\w+)/i)
+  if (warningsMatch) { await showWarnings(chatId, warningsMatch[1]);                return }
+
+  const clearwarnMatch = text.match(/^\/clearwarnings\s+@?(\w+)/i)
+  if (clearwarnMatch){ await clearWarnings(chatId, fromId, clearwarnMatch[1]);      return }
+
+  const tempbanMatch = text.match(/^\/tempban\s+@?(\w+)\s+(\d+)\s+([\s\S]+)/i)
+  if (tempbanMatch)  { await doTempBan(chatId, fromId, tempbanMatch[1], parseInt(tempbanMatch[2]), tempbanMatch[3].trim()); return }
 
   const revMatch = text.match(/^\/revenue\s+(today|week|month)$/i)
   if (revMatch)     { await sendRevenue(chatId, revMatch[1].toLowerCase());         return }
@@ -191,6 +247,10 @@ async function sendAdminMenu(chatId) {
         { text: '📤 Экспорт orders',       callback_data: 'admin:export_orders' },
       ],
       [
+        { text: '⚠️ Предупреждения',       callback_data: 'admin:warned' },
+        { text: '🔒 Заблокированные',      callback_data: 'admin:blocked' },
+      ],
+      [
         { text: '🚫 Заблокировать',        callback_data: 'admin:ban_help' },
         { text: '✅ Разблокировать',       callback_data: 'admin:unban_help' },
       ],
@@ -208,15 +268,15 @@ async function sendAdminMenu(chatId) {
       ],
       [
         { text: '💰 Баланс бота',          callback_data: 'admin:balance' },
+        { text: '🔌 Сессии',              callback_data: 'admin:sessions' },
+      ],
+      [
+        { text: '📝 Лог действий',         callback_data: 'admin:adminlog' },
         { text: '⏳ Ожидают вывода',       callback_data: 'admin:pending' },
       ],
       [
-        { text: '🔒 Заблокированные',      callback_data: 'admin:blocked' },
-        { text: '📝 Лог действий',         callback_data: 'admin:adminlog' },
-      ],
-      [
-        { text: '🔌 Сессии',              callback_data: 'admin:sessions' },
         { text: '📈 Выручка сегодня',      callback_data: 'admin:revenue_today' },
+        { text: '📈 За неделю',            callback_data: 'admin:revenue_week' },
       ],
     ]},
   })
@@ -767,6 +827,147 @@ async function showComplaints(chatId) {
 }
 
 // ════════════════════════════════════════════════════
+//  СИСТЕМА ПРЕДУПРЕЖДЕНИЙ
+// ════════════════════════════════════════════════════
+async function doWarn(chatId, adminId, username, reason) {
+  const { rows } = await db.query(
+    `UPDATE users
+     SET warnings_count = warnings_count + 1
+     WHERE LOWER(username) = LOWER($1)
+     RETURNING id, telegram_id, username, first_name, warnings_count`,
+    [username.replace('@', '')]
+  )
+  const u = rows[0]
+  if (!u) { await tg('sendMessage', { chat_id: chatId, text: `❌ @${username} не найден` }); return }
+
+  const cnt = u.warnings_count
+  const who = u.username ? `@${md(u.username)}` : md(u.first_name)
+  let userMsg = ''
+  let adminMsg = ''
+
+  if (cnt === 1) {
+    userMsg  = `⚠️ *Вы получили предупреждение (1/3)*\nПричина: ${reason}\n\nБудьте осторожны!`
+    adminMsg = `⚠️ Предупреждение 1/3 выдано ${who}`
+    adminLog(adminId, `warn 1/3 @${u.username || u.first_name}: ${reason}`, 'warning')
+
+  } else if (cnt === 2) {
+    // Временный бан на 7 дней
+    const bannedUntil = new Date(Date.now() + 7 * 86400000)
+    await db.query(
+      `UPDATE users SET banned_until = $1, ban_reason = $2 WHERE id = $3`,
+      [bannedUntil, reason, u.id]
+    )
+    userMsg  = `⚠️ *Вы получили второе предупреждение (2/3)*\nПричина: ${reason}\n\nВы *временно заблокированы на 7 дней*.`
+    adminMsg = `⚠️ Предупреждение 2/3 → temp ban 7 дн. для ${who}`
+    adminLog(adminId, `warn 2/3 + tempban @${u.username || u.first_name}: ${reason}`, 'warning')
+
+  } else {
+    // 3+ → постоянный бан
+    await db.query(
+      `UPDATE users SET is_banned = TRUE, ban_reason = $1, banned_until = NULL WHERE id = $2`,
+      [reason, u.id]
+    )
+    userMsg  = `🚫 *Вы получили 3 предупреждения и заблокированы навсегда.*\nПричина: ${reason}`
+    adminMsg = `🚫 Предупреждение 3/3 → перм. бан для ${who}`
+    adminLog(adminId, `warn 3/3 + permban @${u.username || u.first_name}: ${reason}`, 'warning')
+  }
+
+  // Уведомляем пользователя
+  if (u.telegram_id) {
+    tg('sendMessage', { chat_id: u.telegram_id, text: userMsg, parse_mode: 'Markdown' }).catch(() => {})
+  }
+
+  await tg('sendMessage', { chat_id: chatId, text: `${adminMsg}\nПредупреждений: *${cnt}/3*`, parse_mode: 'Markdown' })
+}
+
+async function showWarnings(chatId, username) {
+  const { rows } = await db.query(
+    `SELECT username, first_name, warnings_count, is_banned, banned_until, ban_reason
+     FROM users WHERE LOWER(username) = LOWER($1)`,
+    [username.replace('@', '')]
+  )
+  const u = rows[0]
+  if (!u) { await tg('sendMessage', { chat_id: chatId, text: `❌ @${username} не найден` }); return }
+  const who = u.username ? `@${md(u.username)}` : md(u.first_name)
+  let status = '✅ Активен'
+  if (u.is_banned) status = '🚫 Забанен навсегда'
+  else if (u.banned_until && new Date(u.banned_until) > new Date()) {
+    const dt = new Date(u.banned_until).toLocaleDateString('ru', { day: 'numeric', month: 'short' })
+    status = `⏳ Temp бан до ${dt}`
+  }
+  await tg('sendMessage', {
+    chat_id: chatId,
+    text:
+      `👤 *${who}*\n` +
+      `Предупреждений: *${u.warnings_count}/3*\n` +
+      `Статус: ${status}` +
+      (u.ban_reason ? `\nПричина: ${md(u.ban_reason)}` : ''),
+    parse_mode: 'Markdown',
+  })
+}
+
+async function clearWarnings(chatId, adminId, username) {
+  const { rows } = await db.query(
+    `UPDATE users SET warnings_count = 0 WHERE LOWER(username) = LOWER($1)
+     RETURNING username, first_name`,
+    [username.replace('@', '')]
+  )
+  if (!rows[0]) { await tg('sendMessage', { chat_id: chatId, text: `❌ @${username} не найден` }); return }
+  const who = rows[0].username ? `@${md(rows[0].username)}` : md(rows[0].first_name)
+  adminLog(adminId, `clearwarnings @${rows[0].username || rows[0].first_name}`, 'info')
+  await tg('sendMessage', { chat_id: chatId, text: `✅ Предупреждения сброшены для ${who}`, parse_mode: 'Markdown' })
+}
+
+async function doTempBan(chatId, adminId, username, days, reason) {
+  const bannedUntil = new Date(Date.now() + days * 86400000)
+  const { rows } = await db.query(
+    `UPDATE users SET banned_until = $1, ban_reason = $2
+     WHERE LOWER(username) = LOWER($3)
+     RETURNING id, telegram_id, username, first_name`,
+    [bannedUntil, reason, username.replace('@', '')]
+  )
+  const u = rows[0]
+  if (!u) { await tg('sendMessage', { chat_id: chatId, text: `❌ @${username} не найден` }); return }
+  const who  = u.username ? `@${md(u.username)}` : md(u.first_name)
+  const dtFmt = bannedUntil.toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })
+  if (u.telegram_id) {
+    tg('sendMessage', {
+      chat_id: u.telegram_id,
+      text: `⏳ *Ваш аккаунт временно заблокирован на ${days} дн.*\nДо: *${dtFmt}*\nПричина: ${reason}`,
+      parse_mode: 'Markdown',
+    }).catch(() => {})
+  }
+  adminLog(adminId, `tempban ${days}d @${u.username || u.first_name}: ${reason}`, 'warning')
+  await tg('sendMessage', {
+    chat_id: chatId,
+    text: `⏳ ${who} заблокирован на *${days} дн.* до ${dtFmt}`,
+    parse_mode: 'Markdown',
+  })
+}
+
+async function sendWarned(chatId) {
+  const { rows } = await db.query(`
+    SELECT username, first_name, warnings_count, is_banned, banned_until
+    FROM users WHERE warnings_count > 0
+    ORDER BY warnings_count DESC, updated_at DESC
+    LIMIT 20
+  `)
+  if (!rows.length) { await tg('sendMessage', { chat_id: chatId, text: '✅ Пользователей с предупреждениями нет.' }); return }
+  const lines = rows.map(u => {
+    const who = u.username ? `@${md(u.username)}` : md(u.first_name)
+    let flag = ''
+    if (u.is_banned) flag = ' 🚫'
+    else if (u.banned_until && new Date(u.banned_until) > new Date()) flag = ' ⏳'
+    return `• ${who}${flag} — ${u.warnings_count}/3 предупр.`
+  }).join('\n')
+  await tg('sendMessage', {
+    chat_id: chatId,
+    text: `⚠️ *Пользователи с предупреждениями (${rows.length})*\n\n${lines}`,
+    parse_mode: 'Markdown',
+  })
+}
+
+// ════════════════════════════════════════════════════
 //  МОДЕРАЦИЯ ЗАКАЗОВ
 // ════════════════════════════════════════════════════
 async function sendModeration(chatId) {
@@ -991,6 +1192,7 @@ async function handleCallback(cq) {
 
   const map = {
     'admin:moderation':       () => sendModeration(chatId),
+    'admin:warned':           () => sendWarned(chatId),
     'admin:stats':            () => sendStats(chatId),
     'admin:frozen':           () => sendFrozen(chatId),
     'admin:withdrawals':      () => sendWithdrawals(chatId),

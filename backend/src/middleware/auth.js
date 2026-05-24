@@ -62,7 +62,38 @@ export async function authMiddleware(req, res, next) {
   }
 
   try {
-    req.user = await getOrCreateUser(telegramUser)
+    const user = await getOrCreateUser(telegramUser)
+
+    // Авто-снятие истёкшего временного бана
+    if (user.banned_until && new Date(user.banned_until) <= new Date()) {
+      await db.query(
+        `UPDATE users SET banned_until = NULL, ban_reason = NULL WHERE id = $1`,
+        [user.id]
+      )
+      user.banned_until = null
+      user.ban_reason   = null
+    }
+
+    // Постоянный бан
+    if (user.is_banned) {
+      return res.status(403).json({
+        error:        'Account permanently banned',
+        is_permanent: true,
+        ban_reason:   user.ban_reason || null,
+      })
+    }
+
+    // Временный бан
+    if (user.banned_until && new Date(user.banned_until) > new Date()) {
+      return res.status(403).json({
+        error:        'Account temporarily banned',
+        is_permanent: false,
+        banned_until: user.banned_until,
+        ban_reason:   user.ban_reason || null,
+      })
+    }
+
+    req.user = user
     next()
   } catch (err) {
     next(err)
