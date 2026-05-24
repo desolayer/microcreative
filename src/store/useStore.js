@@ -16,7 +16,11 @@ export const useStore = create((set, get) => ({
 
   // ── Сделки ────────────────────────────────────
   deals: [],
-  setDeals: (deals) => set({ deals }),
+  dealsUnreadCount: 0,
+  setDeals: (deals) => set({
+    deals,
+    dealsUnreadCount: deals.reduce((sum, d) => sum + (parseInt(d.unread_count) || 0), 0),
+  }),
 
   // ── Баланс кошелька (загружается с API) ───────
   balance: {

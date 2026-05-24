@@ -81,10 +81,12 @@ export async function createCryptoBotInvoice({ userId, orderId, amount, asset, d
  * Различает оплату сделки и пополнение баланса по полю payload в инвойсе.
  */
 export async function handleCryptoBotWebhook(payload) {
+  console.log('[CryptoBot] webhook received:', payload.update_type, JSON.stringify(payload).substring(0, 300))
   if (payload.update_type !== 'invoice_paid') return
 
   const invoice = payload.payload
   const invoiceId = String(invoice.invoice_id)
+  console.log('[CryptoBot] invoice_paid invoiceId:', invoiceId, 'amount:', invoice.amount, 'asset:', invoice.asset || invoice.fiat)
 
   // Разбираем payload, который мы записали при создании инвойса
   let invoicePayload = {}
@@ -145,6 +147,7 @@ export async function handleCryptoBotWebhook(payload) {
  * Зачисляет сумму на баланс клиента, немедленно замораживает в эскроу, активирует сделку.
  */
 async function handleDealPayment(invoice, dealId) {
+  console.log('[CryptoBot] handleDealPayment dealId:', dealId, 'invoiceId:', invoice.invoice_id)
   if (!dealId) return
 
   const { rows: dealRows } = await db.query(

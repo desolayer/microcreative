@@ -10,7 +10,7 @@ const tabs = [
 ]
 
 export default function BottomNav({ onNavigate }) {
-  const { activeTab, setActiveTab, unreadCount } = useStore()
+  const { activeTab, setActiveTab, unreadCount, dealsUnreadCount } = useStore()
   const { haptic } = useTelegram()
 
   const handleTab = (id) => {
@@ -43,9 +43,12 @@ export default function BottomNav({ onNavigate }) {
                 className={`ti ${tab.icon}`}
                 style={{ fontSize: 22, color: isActive ? '#a78bfa' : '#444' }}
               />
-              {/* Бейдж непрочитанных уведомлений */}
+              {/* Бейдж непрочитанных */}
               {tab.id === 'profile' && unreadCount > 0 && (
                 <div style={styles.badge}>{unreadCount}</div>
+              )}
+              {tab.id === 'deals' && dealsUnreadCount > 0 && (
+                <div style={styles.badge}>{dealsUnreadCount > 99 ? '99+' : dealsUnreadCount}</div>
               )}
             </div>
             <span style={{ ...styles.label, color: isActive ? '#a78bfa' : '#444' }}>

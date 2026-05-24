@@ -11,7 +11,7 @@ export const config = {
     apiUrl: process.env.CRYPTOBOT_API_URL || 'https://pay.crypt.bot/api',
   },
 
-  platformCommission: parseFloat(process.env.PLATFORM_COMMISSION || '10'),
+  platformCommission: parseFloat(process.env.PLATFORM_COMMISSION || '15'),
   backendUrl:  process.env.BACKEND_URL  || 'http://localhost:3000',
   frontendUrl: process.env.FRONTEND_URL || 'https://microcreative-extract.vercel.app',
   adminTelegramId: process.env.ADMIN_TELEGRAM_ID || null,

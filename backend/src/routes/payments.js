@@ -51,8 +51,10 @@ router.get('/:paymentId/status', async (req, res, next) => {
 })
 
 // POST /api/webhooks/cryptobot  (без authMiddleware — вызывается CryptoBot)
-router.post('/webhooks/cryptobot', async (req, res, next) => {
+// Маршрут /cryptobot потому что роутер смонтирован на /api/webhooks
+router.post('/cryptobot', async (req, res, next) => {
   try {
+    console.log('[Webhook] CryptoBot event:', JSON.stringify(req.body).substring(0, 200))
     await handleCryptoBotWebhook(req.body)
     res.json({ ok: true })
   } catch (err) {

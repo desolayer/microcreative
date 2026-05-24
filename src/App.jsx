@@ -6,6 +6,8 @@ import ProfilePage from './pages/ProfilePage'
 import OrderDetailPage from './pages/OrderDetailPage'
 import DealPage from './pages/DealPage'
 import ResponsesPage from './pages/ResponsesPage'
+import DealsPage from './pages/DealsPage'
+import WalletPage from './pages/WalletPage'
 import { profileAPI, notificationsAPI, walletAPI } from './utils/api'
 import { useStore } from './store/useStore'
 
@@ -98,27 +100,11 @@ export default function App() {
 
       case 'deals':
         return (
-          <div style={styles.placeholder}>
-            <i className="ti ti-message" style={{ fontSize: 48, color: '#333' }} />
-            <div style={{ color: '#555', marginTop: 12 }}>Мои сделки</div>
-          </div>
+          <DealsPage onDealClick={(dealId) => navigate('deal', { id: dealId })} />
         )
 
       case 'wallet':
-        return (
-          <div style={styles.placeholder}>
-            <i className="ti ti-wallet" style={{ fontSize: 48, color: '#333' }} />
-            <div style={{ color: '#555', marginTop: 12 }}>Кошелёк</div>
-          </div>
-        )
-
-      case 'notifications':
-        return (
-          <div style={styles.placeholder}>
-            <i className="ti ti-bell" style={{ fontSize: 48, color: '#333' }} />
-            <div style={{ color: '#555', marginTop: 12 }}>Уведомления</div>
-          </div>
-        )
+        return <WalletPage />
 
       case 'profile':
         return <ProfilePage />

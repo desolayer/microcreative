@@ -60,6 +60,7 @@ export async function releaseEscrow(dealId) {
     const { balance, frozen } = cols(deal.currency)
     const commission = (deal.amount * config.platformCommission) / 100
     const freelancerAmount = deal.amount - commission
+    console.log(`[Escrow] release dealId=${dealId} amount=${deal.amount} commission=${commission}(${config.platformCommission}%) freelancer=${freelancerAmount} ${deal.currency}`)
 
     // Размораживаем у заказчика
     await client.query(
