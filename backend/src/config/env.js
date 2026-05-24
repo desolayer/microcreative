@@ -11,6 +11,12 @@ export const config = {
     apiUrl: process.env.CRYPTOBOT_API_URL || 'https://pay.crypt.bot/api',
   },
 
+  cryptomus: {
+    merchantId: process.env.CRYPTOMUS_MERCHANT_ID || null,
+    apiKey:     process.env.CRYPTOMUS_API_KEY     || null,
+    apiUrl:     process.env.CRYPTOMUS_API_URL     || 'https://api.cryptomus.com/v1',
+  },
+
   platformCommission: parseFloat(process.env.PLATFORM_COMMISSION || '15'),
   backendUrl:  process.env.BACKEND_URL  || 'http://localhost:3000',
   frontendUrl: process.env.FRONTEND_URL || 'https://microcreative-extract.vercel.app',

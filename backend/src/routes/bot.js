@@ -12,6 +12,9 @@ const tg = (method, data) =>
   axios.post(`https://api.telegram.org/bot${config.telegramBotToken}/${method}`, data)
     .catch(e => console.error('TG error:', e?.response?.data?.description || e.message))
 
+/** Экранирует спецсимволы Markdown v1: _ * ` [ */
+const md = (s) => String(s ?? '').replace(/[_*`\[]/g, '\\$&')
+
 const isAdmin = (id) =>
   config.adminTelegramId && parseInt(id) === parseInt(config.adminTelegramId)
 
@@ -221,7 +224,7 @@ async function sendStats(chatId) {
   ])
   const topText = top5.rows.length
     ? top5.rows.map((u, i) =>
-        `${i + 1}. ${u.username ? `@${u.username}` : u.first_name} — ⭐${parseFloat(u.rating).toFixed(1)} (${u.completed_deals} сделок)`
+        `${i + 1}. ${u.username ? `@${md(u.username)}` : md(u.first_name)} — ⭐${parseFloat(u.rating).toFixed(1)} (${u.completed_deals} сделок)`
       ).join('\n')
     : 'Нет данных'
   await tg('sendMessage', {
@@ -492,7 +495,7 @@ async function sendRecentUsers(chatId) {
     FROM users ORDER BY created_at DESC LIMIT 8
   `)
   const lines = rows.map(r => {
-    const who   = r.username ? `@${r.username}` : r.first_name
+    const who   = r.username ? `@${md(r.username)}` : md(r.first_name)
     const flags = [r.is_banned ? '🚫' : '', r.is_verified ? '✓' : ''].filter(Boolean).join('')
     const dt    = new Date(r.created_at).toLocaleDateString('ru')
     return `• ${who} ${flags} | сделок: ${r.completed_deals} | ${dt}`
@@ -513,8 +516,8 @@ async function sendRecentOrders(chatId) {
     ORDER BY o.created_at DESC LIMIT 8
   `)
   const lines = rows.map(r => {
-    const who = r.username ? `@${r.username}` : r.first_name
-    return `• #${r.id} _${r.title.substring(0,40)}_\n  ${r.budget} ${r.currency} | ${r.status} | ${who} | 💬 ${r.resp}`
+    const who = r.username ? `@${md(r.username)}` : md(r.first_name)
+    return `• #${r.id} _${md(r.title.substring(0,40))}_\n  ${r.budget} ${r.currency} | ${r.status} | ${who} | 💬 ${r.resp}`
   }).join('\n\n')
   await tg('sendMessage', {
     chat_id: chatId,
@@ -589,9 +592,9 @@ async function sendLonely(chatId) {
   `)
   if (!rows.length) { await tg('sendMessage', { chat_id: chatId, text: '✅ Заказов без откликов старше 3 дней нет.' }); return }
   const lines = rows.map(r => {
-    const who = r.username ? `@${r.username}` : r.first_name
+    const who = r.username ? `@${md(r.username)}` : md(r.first_name)
     const age = Math.floor((Date.now() - new Date(r.created_at)) / 86400000)
-    return `• #${r.id} _${r.title}_ (${r.budget} ${r.currency}) — ${who}, ${age} дн.`
+    return `• #${r.id} _${md(r.title)}_ (${r.budget} ${r.currency}) — ${who}, ${age} дн.`
   }).join('\n')
   await tg('sendMessage', { chat_id: chatId, text: `😴 *Без откликов > 3 дней (${rows.length} шт.)*\n\n${lines}`, parse_mode: 'Markdown' })
 }
@@ -621,8 +624,8 @@ async function sendDuplicates(chatId) {
   `)
   if (!rows.length) { await tg('sendMessage', { chat_id: chatId, text: '✅ Подозрительных дубликатов нет.' }); return }
   const lines = rows.map(r => {
-    const who = r.username ? `@${r.username}` : r.first_name
-    return `🔍 ${who} — ${r.cnt} похожих\n  IDs: ${r.ids.join(', ')}\n  «${r.titles[0]}»`
+    const who = r.username ? `@${md(r.username)}` : md(r.first_name)
+    return `🔍 ${who} — ${r.cnt} похожих\n  IDs: ${r.ids.join(', ')}\n  «${md(r.titles[0])}»`
   }).join('\n\n')
   await tg('sendMessage', { chat_id: chatId, text: `🔍 *Дубликаты (7 дней)*\n\n${lines}`, parse_mode: 'Markdown' })
 }
