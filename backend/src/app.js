@@ -16,6 +16,7 @@ import ordersRouter       from './routes/orders.js'
 import dealsRouter        from './routes/deals.js'
 import walletRouter       from './routes/wallet.js'
 import paymentsRouter     from './routes/payments.js'
+import webhooksRouter     from './routes/webhooks.js'
 import profileRouter      from './routes/profile.js'
 import notificationsRouter from './routes/notifications.js'
 import botRouter           from './routes/bot.js'
@@ -44,7 +45,7 @@ const limiter = rateLimit({
 app.use('/api', limiter)
 
 // ── Вебхуки (без авторизации) ─────────────────────────
-app.use('/api/webhooks', paymentsRouter)  // CryptoBot / Cryptomus
+app.use('/api/webhooks', webhooksRouter)   // CryptoBot (no auth)
 app.use('/api/bot',      botRouter)       // Telegram Bot updates
 
 // ── API с авторизацией ────────────────────────────────

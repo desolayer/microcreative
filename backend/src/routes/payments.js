@@ -3,13 +3,12 @@ import { db } from '../config/database.js'
 import {
   createCryptoBotInvoice,
   getCryptoBotInvoiceStatus,
-  handleCryptoBotWebhook,
   ALL_ASSETS,
 } from '../services/cryptobot.js'
 
 const router = Router()
 
-// POST /api/payments/cryptobot
+// POST /api/payments/cryptobot — создать инвойс для пополнения кошелька (требует авторизации)
 // asset: 'TON' | 'USDT' | 'BTC' | 'ETH' | 'LTC' | 'BNB' | 'TRX' | 'USDC' | 'XTR'
 router.post('/cryptobot', async (req, res, next) => {
   try {
@@ -45,18 +44,6 @@ router.get('/:paymentId/status', async (req, res, next) => {
     )
     if (!rows[0]) return res.status(404).json({ error: 'Payment not found' })
     res.json(rows[0])
-  } catch (err) {
-    next(err)
-  }
-})
-
-// POST /api/webhooks/cryptobot  (без authMiddleware — вызывается CryptoBot)
-// Маршрут /cryptobot потому что роутер смонтирован на /api/webhooks
-router.post('/cryptobot', async (req, res, next) => {
-  try {
-    console.log('[Webhook] CryptoBot event:', JSON.stringify(req.body).substring(0, 200))
-    await handleCryptoBotWebhook(req.body)
-    res.json({ ok: true })
   } catch (err) {
     next(err)
   }
