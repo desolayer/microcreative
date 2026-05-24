@@ -8,6 +8,7 @@ import DealPage from './pages/DealPage'
 import ResponsesPage from './pages/ResponsesPage'
 import DealsPage from './pages/DealsPage'
 import WalletPage from './pages/WalletPage'
+import NotificationsPage from './pages/NotificationsPage'
 import { profileAPI, notificationsAPI, walletAPI } from './utils/api'
 import { useStore } from './store/useStore'
 import api from './utils/api'
@@ -59,7 +60,13 @@ export default function App() {
   const renderPage = () => {
     switch (currentPage) {
       case 'feed':
-        return <FeedPage key={feedKey} onOrderClick={(order) => navigate('order-detail', order)} />
+        return (
+          <FeedPage
+            key={feedKey}
+            onOrderClick={(order) => navigate('order-detail', order)}
+            onNavigate={navigate}
+          />
+        )
 
       case 'order-detail':
         return (
@@ -116,12 +123,15 @@ export default function App() {
       case 'profile':
         return <ProfilePage />
 
+      case 'notifications':
+        return <NotificationsPage onBack={() => navigate('feed')} />
+
       default:
         return <FeedPage onOrderClick={(order) => navigate('order-detail', order)} />
     }
   }
 
-  const hideNav = ['order-detail', 'deal', 'responses', 'payment', 'respond', 'create'].includes(currentPage)
+  const hideNav = ['order-detail', 'deal', 'responses', 'payment', 'respond', 'create', 'notifications'].includes(currentPage)
 
   // Режим обслуживания — показываем заглушку
   if (maintenance) {

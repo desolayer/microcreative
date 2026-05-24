@@ -47,12 +47,13 @@ function normalizeOrder(o) {
   }
 }
 
-export default function FeedPage({ onOrderClick }) {
+export default function FeedPage({ onOrderClick, onNavigate }) {
   const { user } = useTelegram()
-  const { activeCategory, setActiveCategory } = useStore()
+  const { activeCategory, setActiveCategory, unreadCount } = useStore()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -64,6 +65,13 @@ export default function FeedPage({ onOrderClick }) {
       .finally(() => setLoading(false))
   }, [activeCategory])
 
+  const filteredOrders = searchQuery.trim()
+    ? orders.filter(o =>
+        o.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (o.desc || '').toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : orders
+
   return (
     <div style={styles.page}>
       <div style={styles.header}>
@@ -73,14 +81,29 @@ export default function FeedPage({ onOrderClick }) {
             Micro<span style={{ color: '#a78bfa' }}>Creative</span>
           </div>
         </div>
-        <div style={styles.notifBtn}>
-          <i className="ti ti-bell" style={{ fontSize: 18, color: '#666' }} />
+        <div style={styles.notifBtn} onClick={() => onNavigate?.('notifications')}>
+          <i className="ti ti-bell" style={{ fontSize: 18, color: unreadCount > 0 ? '#a78bfa' : '#666' }} />
+          {unreadCount > 0 && (
+            <div style={styles.notifBadge}>{unreadCount > 9 ? '9+' : unreadCount}</div>
+          )}
         </div>
       </div>
 
       <div style={styles.search}>
-        <i className="ti ti-search" style={{ fontSize: 16, color: '#444' }} />
-        <span style={{ fontSize: 14, color: '#444' }}>Поиск заказов...</span>
+        <i className="ti ti-search" style={{ fontSize: 16, color: '#444', flexShrink: 0 }} />
+        <input
+          style={styles.searchInput}
+          placeholder="Поиск заказов..."
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+        />
+        {searchQuery && (
+          <i
+            className="ti ti-x"
+            style={{ fontSize: 14, color: '#444', cursor: 'pointer', flexShrink: 0 }}
+            onClick={() => setSearchQuery('')}
+          />
+        )}
       </div>
 
       <div style={styles.cats}>
@@ -114,14 +137,16 @@ export default function FeedPage({ onOrderClick }) {
         </div>
       )}
 
-      {!loading && !error && orders.length === 0 && (
+      {!loading && !error && filteredOrders.length === 0 && (
         <div style={styles.center}>
           <i className="ti ti-inbox" style={{ fontSize: 40, color: '#333' }} />
-          <span style={{ color: '#555', fontSize: 14, marginTop: 12 }}>Заказов пока нет</span>
+          <span style={{ color: '#555', fontSize: 14, marginTop: 12 }}>
+            {searchQuery ? 'Ничего не найдено' : 'Заказов пока нет'}
+          </span>
         </div>
       )}
 
-      {orders.map(order => (
+      {filteredOrders.map(order => (
         <OrderCard key={order.id} order={order} onClick={() => onOrderClick?.(order)} />
       ))}
 
@@ -194,14 +219,28 @@ const styles = {
   greeting: { fontSize: 13, color: '#555', marginBottom: 2 },
   title: { fontSize: 22, fontWeight: 500 },
   notifBtn: {
+    position: 'relative',
     width: 36, height: 36, borderRadius: '50%',
     background: '#1a1a1a', border: '0.5px solid #2a2a2a',
     display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+    flexShrink: 0,
+  },
+  notifBadge: {
+    position: 'absolute', top: -3, right: -3,
+    minWidth: 16, height: 16, borderRadius: 8,
+    background: '#a78bfa', color: '#fff',
+    fontSize: 9, fontWeight: 700,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: '0 3px',
   },
   search: {
     margin: '0 20px 16px', background: '#1a1a1a', border: '0.5px solid #2a2a2a',
     borderRadius: 12, padding: '10px 14px',
     display: 'flex', alignItems: 'center', gap: 8,
+  },
+  searchInput: {
+    flex: 1, background: 'transparent', border: 'none', outline: 'none',
+    fontSize: 14, color: '#e5e5e5', fontFamily: 'inherit',
   },
   cats: { display: 'flex', gap: 8, padding: '0 20px 20px', overflowX: 'auto' },
   cat: {
