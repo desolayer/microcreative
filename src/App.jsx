@@ -10,15 +10,22 @@ import DealsPage from './pages/DealsPage'
 import WalletPage from './pages/WalletPage'
 import { profileAPI, notificationsAPI, walletAPI } from './utils/api'
 import { useStore } from './store/useStore'
+import api from './utils/api'
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('feed')
-  const [pageParams, setPageParams]   = useState(null)
-  const [feedKey, setFeedKey]         = useState(0)   // инкремент → FeedPage перемонтируется
+  const [currentPage, setCurrentPage]     = useState('feed')
+  const [pageParams, setPageParams]       = useState(null)
+  const [feedKey, setFeedKey]             = useState(0)   // инкремент → FeedPage перемонтируется
+  const [maintenance, setMaintenance]     = useState(false)
   const { setUser, setBalance, setUnreadCount } = useStore()
 
-  // Инициализация: загружаем профиль, баланс, счётчик уведомлений
+  // Инициализация: загружаем статус + профиль, баланс, счётчик уведомлений
   useEffect(() => {
+    // Проверяем режим обслуживания
+    api.get('/status')
+      .then(r => { if (r.data.maintenance) setMaintenance(true) })
+      .catch(() => {})
+
     profileAPI.getMe()
       .then(r => setUser(r.data))
       .catch(() => {}) // dev-режим без Telegram — не критично
@@ -115,6 +122,26 @@ export default function App() {
   }
 
   const hideNav = ['order-detail', 'deal', 'responses', 'payment', 'respond', 'create'].includes(currentPage)
+
+  // Режим обслуживания — показываем заглушку
+  if (maintenance) {
+    return (
+      <div style={{
+        minHeight: '100vh', background: '#0f0f0f', display: 'flex',
+        flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        color: '#e5e5e5', textAlign: 'center', padding: 32,
+      }}>
+        <div style={{ fontSize: 56 }}>🔧</div>
+        <div style={{ fontSize: 22, fontWeight: 700, marginTop: 16, marginBottom: 8 }}>
+          Технические работы
+        </div>
+        <div style={{ fontSize: 15, color: '#888' }}>Мы скоро вернёмся!</div>
+        <div style={{ fontSize: 13, color: '#555', marginTop: 8 }}>
+          Приносим извинения за неудобства.
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={styles.app}>

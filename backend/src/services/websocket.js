@@ -101,3 +101,12 @@ export function broadcastToDeal(clientId, freelancerId, data) {
   sendToUser(clientId, data)
   sendToUser(freelancerId, data)
 }
+
+/**
+ * Возвращает общее кол-во активных WebSocket-соединений.
+ */
+export function getActiveConnectionsCount() {
+  let count = 0
+  for (const sockets of userSockets.values()) count += sockets.size
+  return count
+}

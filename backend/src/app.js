@@ -12,13 +12,14 @@ import { config } from './config/env.js'
 import { pool } from './config/database.js'
 import { setupWebSocket } from './services/websocket.js'
 import { startScheduler } from './services/scheduler.js'
+import { notifyAdmin } from './services/adminNotify.js'
 
-import ordersRouter       from './routes/orders.js'
-import dealsRouter        from './routes/deals.js'
-import walletRouter       from './routes/wallet.js'
-import paymentsRouter     from './routes/payments.js'
-import webhooksRouter     from './routes/webhooks.js'
-import profileRouter      from './routes/profile.js'
+import ordersRouter        from './routes/orders.js'
+import dealsRouter         from './routes/deals.js'
+import walletRouter        from './routes/wallet.js'
+import paymentsRouter      from './routes/payments.js'
+import webhooksRouter      from './routes/webhooks.js'
+import profileRouter       from './routes/profile.js'
 import notificationsRouter from './routes/notifications.js'
 import botRouter           from './routes/bot.js'
 import supportRouter       from './routes/support.js'
@@ -45,9 +46,25 @@ const limiter = rateLimit({
 })
 app.use('/api', limiter)
 
-// ── Вебхуки (без авторизации) ─────────────────────────
-app.use('/api/webhooks', webhooksRouter)   // CryptoBot (no auth)
-app.use('/api/bot',      botRouter)       // Telegram Bot updates
+// ── Публичные эндпоинты (без авторизации) ────────────
+app.use('/api/webhooks', webhooksRouter)
+app.use('/api/bot',      botRouter)
+
+// Статус приложения — maintenance mode
+app.get('/api/status', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT value FROM app_settings WHERE key = 'maintenance_mode'`
+    )
+    res.json({
+      ok: true,
+      maintenance: rows[0]?.value === 'true',
+      version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) || 'dev',
+    })
+  } catch {
+    res.json({ ok: true, maintenance: false, version: 'dev' })
+  }
+})
 
 // ── API с авторизацией ────────────────────────────────
 app.use('/api', authMiddleware)
@@ -85,6 +102,10 @@ server.listen(config.port, () => {
   console.log(`MicroCreative backend running on port ${config.port}`)
   console.log(`Environment: ${config.nodeEnv}`)
   startScheduler()
+
+  // Уведомляем администратора что бэкенд поднялся
+  const ver = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) || 'dev'
+  notifyAdmin(`✅ *Бэкенд запущен* (${ver})\nPort: ${config.port}`).catch(() => {})
 })
 
 export default app
