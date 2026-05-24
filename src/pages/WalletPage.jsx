@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react'
 import { walletAPI, paymentsAPI } from '../utils/api'
 import { useStore } from '../store/useStore'
 
+const WITHDRAW_CURRENCIES = [
+  { asset: 'USDT',  label: 'USDT',           icon: '💵', placeholder: '10', min: 1 },
+  { asset: 'TON',   label: 'TON',            icon: '💎', placeholder: '5',  min: 0.1 },
+  { asset: 'STARS', label: 'Telegram Stars', icon: '⭐', placeholder: '100', min: 10 },
+]
+
 const CURRENCIES = [
   { key: 'usdt',  frozen: 'frozen_usdt',  label: 'USDT',           icon: '💵', color: '#26a17b' },
   { key: 'ton',   frozen: 'frozen_ton',   label: 'TON',            icon: '💎', color: '#0088cc' },
@@ -47,11 +53,20 @@ export default function WalletPage() {
   const [histLoading, setHistLoading] = useState(true)
   // Deposit sheet
   const [showDepSheet, setShowDepSheet] = useState(false)
-  const [depAsset, setDepAsset]         = useState(null)   // selected asset
+  const [depAsset, setDepAsset]         = useState(null)
   const [depAmount, setDepAmount]       = useState('')
   const [depLoading, setDepLoading]     = useState(false)
   const [depError, setDepError]         = useState(null)
   const [depSuccess, setDepSuccess]     = useState(null)
+
+  // Withdraw sheet
+  const [showWdSheet, setShowWdSheet]   = useState(false)
+  const [wdAsset, setWdAsset]           = useState(null)
+  const [wdAmount, setWdAmount]         = useState('')
+  const [wdAddress, setWdAddress]       = useState('')
+  const [wdLoading, setWdLoading]       = useState(false)
+  const [wdError, setWdError]           = useState(null)
+  const [wdSuccess, setWdSuccess]       = useState(null)
 
   useEffect(() => {
     walletAPI.getBalance()
@@ -81,6 +96,46 @@ export default function WalletPage() {
     setDepAmount('')
     setDepError(null)
     setDepSuccess(null)
+  }
+
+  const openWithdraw = () => {
+    setShowWdSheet(true)
+    setWdAsset(null)
+    setWdAmount('')
+    setWdAddress('')
+    setWdError(null)
+    setWdSuccess(null)
+  }
+
+  const handleWithdraw = async () => {
+    if (!wdAmount || parseFloat(wdAmount) <= 0) { setWdError('Введите сумму'); return }
+    if (!wdAddress.trim()) { setWdError('Введите адрес кошелька'); return }
+    const cur = WITHDRAW_CURRENCIES.find(c => c.asset === wdAsset)
+    if (cur && parseFloat(wdAmount) < cur.min) {
+      setWdError(`Минимум ${cur.min} ${wdAsset}`)
+      return
+    }
+    setWdLoading(true)
+    setWdError(null)
+    try {
+      await walletAPI.withdrawRequest({ amount: parseFloat(wdAmount), currency: wdAsset, address: wdAddress.trim() })
+      setWdSuccess(true)
+      setWdAsset(null)
+      // Refresh balance
+      walletAPI.getBalance().then(r => {
+        const d = r.data
+        setBalance({
+          rub: parseFloat(d.balance_rub) || 0, usdt: parseFloat(d.balance_usdt) || 0,
+          ton: parseFloat(d.balance_ton) || 0,  stars: parseInt(d.balance_stars) || 0,
+          frozen_rub: parseFloat(d.frozen_rub) || 0, frozen_usdt: parseFloat(d.frozen_usdt) || 0,
+          frozen_ton: parseFloat(d.frozen_ton) || 0,  frozen_stars: parseInt(d.frozen_stars) || 0,
+        })
+      }).catch(() => {})
+    } catch (e) {
+      setWdError(e.response?.data?.error || 'Ошибка запроса на вывод')
+    } finally {
+      setWdLoading(false)
+    }
   }
 
   const handleDeposit = async () => {
@@ -139,18 +194,26 @@ export default function WalletPage() {
                 </div>
                 <div style={st.balCardRight}>
                   <div style={{ ...st.balAmount, color }}>{avail}</div>
-                  <button
-                    style={st.depBtn}
-                    onClick={() => {
-                      setShowDepSheet(true)
-                      setDepAsset(null)
-                      setDepAmount('')
-                      setDepError(null)
-                      setDepSuccess(null)
-                    }}
-                  >
-                    + Пополнить
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      style={st.depBtn}
+                      onClick={() => {
+                        setShowDepSheet(true)
+                        setDepAsset(null)
+                        setDepAmount('')
+                        setDepError(null)
+                        setDepSuccess(null)
+                      }}
+                    >
+                      + Пополнить
+                    </button>
+                    <button
+                      style={{ ...st.depBtn, color: '#f87171', borderColor: '#3a1a1a' }}
+                      onClick={openWithdraw}
+                    >
+                      ↑ Вывести
+                    </button>
+                  </div>
                 </div>
               </div>
             )
@@ -196,6 +259,83 @@ export default function WalletPage() {
       <div style={{ height: 32 }} />
 
       {/* ── Deposit bottomsheet ── */}
+      {/* ── Withdrawal bottomsheet ── */}
+      {showWdSheet && (
+        <div style={st.overlay} onClick={() => setShowWdSheet(false)}>
+          <div style={st.sheet} onClick={e => e.stopPropagation()}>
+            <div style={st.sheetHandle} />
+
+            {wdSuccess ? (
+              <div style={{ padding: '16px 20px 24px', textAlign: 'center' }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+                <div style={{ color: '#22c55e', fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+                  Запрос отправлен!
+                </div>
+                <div style={{ color: '#666', fontSize: 13, marginBottom: 20 }}>
+                  Средства зарезервированы. Администратор проверит и выполнит вывод.
+                </div>
+                <button onClick={() => setShowWdSheet(false)} style={st.cancelBtn}>Закрыть</button>
+              </div>
+            ) : wdAsset ? (
+              <div style={{ padding: '16px 20px 24px' }}>
+                <div style={st.sheetTitle}>
+                  Вывести {WITHDRAW_CURRENCIES.find(c => c.asset === wdAsset)?.icon} {wdAsset}
+                </div>
+                <input
+                  style={st.depInput}
+                  type="number"
+                  placeholder={`Сумма (мин. ${WITHDRAW_CURRENCIES.find(c => c.asset === wdAsset)?.min})`}
+                  value={wdAmount}
+                  onChange={e => setWdAmount(e.target.value)}
+                  min="0"
+                  step="any"
+                  autoFocus
+                />
+                <input
+                  style={{ ...st.depInput, marginTop: 8, fontFamily: 'monospace', fontSize: 13 }}
+                  type="text"
+                  placeholder={wdAsset === 'STARS' ? 'Telegram username (для возврата Stars)' : 'Адрес кошелька'}
+                  value={wdAddress}
+                  onChange={e => setWdAddress(e.target.value)}
+                />
+                {wdError && <p style={{ color: '#ef4444', fontSize: 13, margin: '6px 0' }}>{wdError}</p>}
+                <p style={{ color: '#555', fontSize: 11, margin: '6px 0 10px', lineHeight: 1.5 }}>
+                  Средства будут зарезервированы и отправлены после проверки администратором.
+                </p>
+                <button
+                  onClick={handleWithdraw}
+                  disabled={wdLoading}
+                  style={{ ...st.payBtn, background: '#ef4444', opacity: wdLoading ? 0.6 : 1 }}
+                >
+                  {wdLoading ? 'Отправляем запрос...' : `Запросить вывод`}
+                </button>
+                <button onClick={() => setWdAsset(null)} style={{ ...st.cancelBtn, marginTop: 8 }}>
+                  ← Назад
+                </button>
+              </div>
+            ) : (
+              <>
+                <div style={{ padding: '4px 20px 12px' }}>
+                  <div style={st.sheetTitle}>Выберите валюту для вывода</div>
+                </div>
+                <div style={st.assetList}>
+                  {WITHDRAW_CURRENCIES.map(({ asset, label, icon }) => (
+                    <button key={asset} onClick={() => setWdAsset(asset)} style={st.assetBtn}>
+                      <span style={st.assetIcon}>{icon}</span>
+                      <span style={st.assetLabel}>{label}</span>
+                      <i className="ti ti-chevron-right" style={{ color: '#555', fontSize: 16, marginLeft: 'auto' }} />
+                    </button>
+                  ))}
+                </div>
+                <div style={{ padding: '0 20px 8px' }}>
+                  <button onClick={() => setShowWdSheet(false)} style={st.cancelBtn}>Отмена</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {showDepSheet && (
         <div style={st.overlay} onClick={() => setShowDepSheet(false)}>
           <div style={st.sheet} onClick={e => e.stopPropagation()}>

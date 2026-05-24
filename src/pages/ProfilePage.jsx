@@ -1,16 +1,61 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { useTelegram } from '../hooks/useTelegram'
 import api from '../utils/api'
+import { profileAPI } from '../utils/api'
+
+const NOTIF_LIST = [
+  { key: 'notif_responses', icon: '🔔', label: 'Новые отклики на мои заказы' },
+  { key: 'notif_messages',  icon: '💬', label: 'Новые сообщения в сделках' },
+  { key: 'notif_balance',   icon: '💰', label: 'Изменения баланса' },
+  { key: 'notif_deals',     icon: '🎉', label: 'Сделка завершена' },
+]
 
 export default function ProfilePage() {
   const { user, balance } = useStore()
   const { haptic } = useTelegram()
-  const [view, setView]         = useState('profile') // 'profile' | 'support'
+  const [view, setView]         = useState('profile') // 'profile' | 'support' | 'notifications'
   const [supportText, setSupportText] = useState('')
   const [sending, setSending]   = useState(false)
   const [sent, setSent]         = useState(false)
   const [error, setError]       = useState('')
+
+  // Notification settings state
+  const [notifs, setNotifs]         = useState({
+    notif_responses: true,
+    notif_messages:  true,
+    notif_balance:   true,
+    notif_deals:     true,
+  })
+  const [notifLoading, setNotifLoading] = useState(false)
+  const [notifSaved, setNotifSaved]     = useState(false)
+
+  // Load notif settings when switching to that view
+  useEffect(() => {
+    if (view !== 'notifications') return
+    profileAPI.getNotifSettings()
+      .then(r => setNotifs({
+        notif_responses: r.data.notif_responses ?? true,
+        notif_messages:  r.data.notif_messages  ?? true,
+        notif_balance:   r.data.notif_balance   ?? true,
+        notif_deals:     r.data.notif_deals     ?? true,
+      }))
+      .catch(() => {})
+  }, [view])
+
+  const toggleNotif = async (key) => {
+    const next = { ...notifs, [key]: !notifs[key] }
+    setNotifs(next)
+    haptic('light')
+    setNotifLoading(true)
+    setNotifSaved(false)
+    try {
+      await profileAPI.saveNotifSettings(next)
+      setNotifSaved(true)
+      setTimeout(() => setNotifSaved(false), 2000)
+    } catch { /* silently ignore */ }
+    finally { setNotifLoading(false) }
+  }
 
   const name = user
     ? [user.first_name, user.last_name].filter(Boolean).join(' ')
@@ -31,6 +76,56 @@ export default function ProfilePage() {
     } finally {
       setSending(false)
     }
+  }
+
+  // ── Notifications view ──────────────────────────────
+  if (view === 'notifications') {
+    return (
+      <div style={s.page}>
+        <div style={s.header}>
+          <button style={s.backBtn} onClick={() => setView('profile')}>
+            <i className="ti ti-arrow-left" style={{ fontSize: 18 }} />
+          </button>
+          <span style={s.headerTitle}>Уведомления</span>
+          <div style={{ width: 36 }} />
+        </div>
+        <div style={s.body}>
+          <div style={s.section}>
+            <div style={s.sectionTitle}>Telegram-уведомления от бота</div>
+            <div style={s.balanceCard}>
+              {NOTIF_LIST.map(({ key, icon, label }, i) => (
+                <div key={key} style={{
+                  ...s.balanceRow,
+                  borderBottom: i < NOTIF_LIST.length - 1 ? '0.5px solid #222' : 'none',
+                }}>
+                  <span style={{ fontSize: 14, color: '#ccc' }}>{icon} {label}</span>
+                  <div
+                    style={{
+                      ...s.toggle,
+                      background: notifs[key] ? '#a78bfa' : '#2a2a2a',
+                    }}
+                    onClick={() => toggleNotif(key)}
+                  >
+                    <div style={{
+                      ...s.toggleThumb,
+                      transform: notifs[key] ? 'translateX(20px)' : 'translateX(2px)',
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {notifSaved && (
+            <div style={{ color: '#22c55e', fontSize: 13, textAlign: 'center', marginTop: 8 }}>
+              ✓ Настройки сохранены
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: '#444', lineHeight: 1.6, marginTop: 12 }}>
+            Уведомления приходят от бота в Telegram. Отключение не влияет на уведомления внутри приложения.
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (view === 'support') {
@@ -165,14 +260,23 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Кнопка поддержки */}
-        <button
-          style={s.supportBtn}
-          onClick={() => { haptic('light'); setView('support') }}
-        >
-          <i className="ti ti-headset" style={{ fontSize: 18, marginRight: 8 }} />
-          🆘 Поддержка
-        </button>
+        {/* Кнопки */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button
+            style={s.supportBtn}
+            onClick={() => { haptic('light'); setView('notifications') }}
+          >
+            <i className="ti ti-bell" style={{ fontSize: 18, marginRight: 8 }} />
+            🔔 Уведомления
+          </button>
+          <button
+            style={s.supportBtn}
+            onClick={() => { haptic('light'); setView('support') }}
+          >
+            <i className="ti ti-headset" style={{ fontSize: 18, marginRight: 8 }} />
+            🆘 Поддержка
+          </button>
+        </div>
       </div>
 
       <div style={{ height: 90 }} />
@@ -234,6 +338,18 @@ const s = {
     fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
 
+  toggle: {
+    width: 44, height: 26, borderRadius: 13,
+    cursor: 'pointer', position: 'relative',
+    transition: 'background 0.2s', flexShrink: 0,
+    display: 'flex', alignItems: 'center',
+  },
+  toggleThumb: {
+    width: 22, height: 22, borderRadius: '50%',
+    background: '#fff', position: 'absolute',
+    transition: 'transform 0.2s',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+  },
   supportHint: { fontSize: 14, color: '#555', marginBottom: 16, lineHeight: 1.5 },
   textarea: {
     width: '100%', minHeight: 140, background: '#1a1a1a',

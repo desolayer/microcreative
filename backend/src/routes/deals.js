@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { db } from '../config/database.js'
 import { lockEscrow, releaseEscrow, refundEscrow } from '../services/escrow.js'
 import { notifyAdmin } from '../services/adminNotify.js'
-import { notifyUser } from '../services/telegramNotify.js'
+import { notifyUser, notifyUserById } from '../services/telegramNotify.js'
 import { broadcastToDeal, sendToUser } from '../services/websocket.js'
 import { createCryptoBotInvoice } from '../services/cryptobot.js'
 
@@ -136,16 +136,12 @@ router.post('/:id/messages', async (req, res, next) => {
       message: { ...newMsg, first_name: req.user.first_name, username: req.user.username, photo_url: req.user.photo_url },
     })
 
-    // TG: уведомляем получателя если не в сети
-    const { rows: recipientRows } = await db.query(
-      `SELECT telegram_id FROM users WHERE id = $1`, [recipientId]
-    )
-    if (recipientRows[0]?.telegram_id) {
-      notifyUser(
-        recipientRows[0].telegram_id,
-        `💬 *${req.user.first_name}*: ${message.trim().substring(0, 120)}`
-      ).catch(() => {})
-    }
+    // TG: уведомляем получателя (с учётом настроек notif_messages)
+    notifyUserById(
+      recipientId,
+      `💬 *${req.user.first_name}*: ${message.trim().substring(0, 120)}`,
+      'message'
+    ).catch(() => {})
 
     res.status(201).json(newMsg)
   } catch (err) {
@@ -189,8 +185,8 @@ router.post('/:id/complete', async (req, res, next) => {
     )
     const clientTg     = users.find(u => u.id === deal.client_id)?.telegram_id
     const freelancerTg = users.find(u => u.id === deal.freelancer_id)?.telegram_id
-    notifyUser(clientTg,     `✅ Сделка завершена! Средства переведены исполнителю.`).catch(() => {})
-    notifyUser(freelancerTg, `🎉 Сделка завершена! ${result.freelancerAmount} ${result.currency} зачислено на ваш баланс.`).catch(() => {})
+    notifyUserById(deal.client_id,     `✅ Сделка завершена! Средства переведены исполнителю.`, 'deal_complete').catch(() => {})
+    notifyUserById(deal.freelancer_id, `🎉 Сделка завершена! ${result.freelancerAmount} ${result.currency} зачислено на ваш баланс.`, 'deal_complete').catch(() => {})
 
     // WebSocket
     broadcastToDeal(deal.client_id, deal.freelancer_id, {

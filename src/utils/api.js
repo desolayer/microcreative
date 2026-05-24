@@ -35,9 +35,11 @@ export const dealsAPI = {
 }
 
 export const walletAPI = {
-  getBalance: () => api.get('/wallet/balance'),
-  getHistory: () => api.get('/wallet/history'),
-  withdraw: (data) => api.post('/wallet/withdraw', data),
+  getBalance:       () => api.get('/wallet/balance'),
+  getHistory:       () => api.get('/wallet/history'),
+  withdraw:         (data) => api.post('/wallet/withdraw', data),
+  withdrawRequest:  (data) => api.post('/wallet/withdraw-request', data),
+  getWithdrawals:   () => api.get('/wallet/withdrawals'),
 }
 
 // asset: 'TON' | 'USDT' | 'BTC' | 'ETH' | 'LTC' | 'BNB' | 'TRX' | 'USDC' | 'XTR'
@@ -54,9 +56,11 @@ export const notificationsAPI = {
 }
 
 export const profileAPI = {
-  getMe: () => api.get('/profile/me'),
-  getUser: (userId) => api.get(`/profile/${userId}`),
-  update: (data) => api.put('/profile/me', data),
+  getMe:             () => api.get('/profile/me'),
+  getUser:           (userId) => api.get(`/profile/${userId}`),
+  update:            (data) => api.put('/profile/me', data),
+  getNotifSettings:  () => api.get('/profile/me/notifications'),
+  saveNotifSettings: (data) => api.put('/profile/me/notifications', data),
 }
 
 export default api

@@ -11,6 +11,7 @@ import { errorHandler } from './middleware/errorHandler.js'
 import { config } from './config/env.js'
 import { pool } from './config/database.js'
 import { setupWebSocket } from './services/websocket.js'
+import { startScheduler } from './services/scheduler.js'
 
 import ordersRouter       from './routes/orders.js'
 import dealsRouter        from './routes/deals.js'
@@ -83,6 +84,7 @@ setupWebSocket(server)
 server.listen(config.port, () => {
   console.log(`MicroCreative backend running on port ${config.port}`)
   console.log(`Environment: ${config.nodeEnv}`)
+  startScheduler()
 })
 
 export default app

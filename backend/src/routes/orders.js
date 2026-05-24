@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { db } from '../config/database.js'
 import { notifyAdmin } from '../services/adminNotify.js'
+import { notifyUserById } from '../services/telegramNotify.js'
 import { config } from '../config/env.js'
 
 const router = Router()
@@ -68,6 +69,21 @@ router.post('/', async (req, res, next) => {
       return res.status(400).json({ error: 'Missing required fields' })
     }
 
+    // Анти-спам: 5+ заказов за час → автобан
+    const { rows: spamCheck } = await db.query(
+      `SELECT COUNT(*) FROM orders
+       WHERE author_id = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
+      [req.user.id]
+    )
+    if (parseInt(spamCheck[0].count) >= 5) {
+      await db.query(`UPDATE users SET is_banned = TRUE WHERE id = $1`, [req.user.id])
+      const who = req.user.username ? `@${req.user.username}` : req.user.first_name
+      notifyAdmin(
+        `🚨 *Автобан (спам)*\nПользователь: ${who} (TG: ${req.user.telegram_id})\nПричина: 5+ заказов за 1 час`
+      ).catch(() => {})
+      return res.status(429).json({ error: 'Слишком много заказов. Аккаунт заблокирован.' })
+    }
+
     const { rows } = await db.query(
       `INSERT INTO orders (author_id, title, description, category, budget, currency, deadline_days, files)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -118,7 +134,7 @@ router.post('/:id/respond', async (req, res, next) => {
       [orderId, req.user.id, message, price || null, currency || null, deadline_days || null]
     )
 
-    // Уведомляем заказчика
+    // Уведомляем заказчика (DB + Telegram с учётом notif_responses)
     await db.query(
       `INSERT INTO notifications (user_id, type, title, body, data)
        VALUES ($1, 'new_response', $2, $3, $4)`,
@@ -129,6 +145,11 @@ router.post('/:id/respond', async (req, res, next) => {
         JSON.stringify({ order_id: parseInt(orderId), response_id: rows[0].id }),
       ]
     )
+    notifyUserById(
+      order.author_id,
+      `🔔 *${req.user.first_name}* откликнулся на ваш заказ!`,
+      'new_response'
+    ).catch(() => {})
 
     res.status(201).json(rows[0])
   } catch (err) {
