@@ -18,7 +18,7 @@ export const config = {
 }
 
 // Проверяем обязательные переменные
-const required = ['DATABASE_URL', 'TELEGRAM_BOT_TOKEN']
+const required = ['DATABASE_URL', 'TELEGRAM_BOT_TOKEN', 'CRYPTOBOT_API_TOKEN']
 for (const key of required) {
   if (!process.env[key]) {
     console.error(`Missing required env variable: ${key}`)
