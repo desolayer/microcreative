@@ -10,9 +10,10 @@ const CURRENCY_LABEL = { RUB: '₽', USDT: '$', TON: 'TON', STARS: '⭐' }
 
 export default function CreateOrderPage({ onBack, onSuccess }) {
   const { haptic } = useTelegram()
-  const [step, setStep]       = useState(1)
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState('')
+  const [step, setStep]           = useState(1)
+  const [loading, setLoading]     = useState(false)
+  const [error, setError]         = useState('')
+  const [submitted, setSubmitted] = useState(false)
 
   const [form, setForm] = useState({
     category:     '',
@@ -55,12 +56,32 @@ export default function CreateOrderPage({ onBack, onSuccess }) {
         deadline_days: form.deadline_days,
       })
       haptic('heavy')
-      onSuccess?.()
+      setSubmitted(true)
     } catch (e) {
       setError(e?.response?.data?.error || 'Не удалось создать заказ')
     } finally {
       setLoading(false)
     }
+  }
+
+  // ── Экран "на модерации" ──────────────────────────────
+  if (submitted) {
+    return (
+      <div style={s.page}>
+        <div style={{ ...s.body, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '80vh', textAlign: 'center' }}>
+          <div style={{ fontSize: 56 }}>⏳</div>
+          <div style={{ fontSize: 20, fontWeight: 600, marginTop: 20, marginBottom: 10 }}>
+            Заказ отправлен на модерацию
+          </div>
+          <div style={{ fontSize: 14, color: '#666', lineHeight: 1.6, maxWidth: 280 }}>
+            Обычно проверка занимает до 10 минут. После одобрения вы получите уведомление, и заказ появится в ленте.
+          </div>
+          <button style={{ ...s.btn, marginTop: 32 }} onClick={() => onSuccess?.()}>
+            Вернуться в ленту
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -113,7 +134,7 @@ export default function CreateOrderPage({ onBack, onSuccess }) {
           </button>
         ) : (
           <button style={{ ...s.btn, opacity: loading ? 0.6 : 1 }} disabled={loading} onClick={submit}>
-            {loading ? 'Публикую...' : '🚀 Опубликовать заказ'}
+            {loading ? 'Отправляю...' : '📨 Отправить на модерацию'}
           </button>
         )}
       </div>

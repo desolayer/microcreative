@@ -35,6 +35,24 @@ router.get('/', async (req, res, next) => {
   }
 })
 
+// GET /api/orders/mine — заказы текущего пользователя (все статусы)
+router.get('/mine', async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, title, category, budget, currency, status, rejection_reason,
+              deadline_days, created_at,
+              (SELECT COUNT(*) FROM order_responses WHERE order_id = orders.id) AS responses_count
+       FROM orders
+       WHERE author_id = $1
+       ORDER BY created_at DESC`,
+      [req.user.id]
+    )
+    res.json(rows)
+  } catch (err) {
+    next(err)
+  }
+})
+
 // GET /api/orders/:id
 router.get('/:id', async (req, res, next) => {
   try {
@@ -92,9 +110,24 @@ router.post('/', async (req, res, next) => {
        deadline_days || 3, JSON.stringify(files || [])]
     )
 
-    // Уведомляем администратора
+    // Уведомляем администратора с кнопками модерации
     const who = req.user.username ? `@${req.user.username}` : req.user.first_name
-    notifyAdmin(`📋 Новый заказ: «${title}», ${budget} ${currency} от ${who}`).catch(() => {})
+    const orderId = rows[0].id
+    const descSnippet = (description || '').substring(0, 180) + (description.length > 180 ? '...' : '')
+    notifyAdmin(
+      `🔍 *Новый заказ на модерацию*\n\n` +
+      `От: ${who}\n` +
+      `Категория: ${category}\n` +
+      `Название: *${title.replace(/[_*`[]/g, '\\$&')}*\n` +
+      `Описание: ${descSnippet.replace(/[_*`[]/g, '\\$&')}\n` +
+      `Бюджет: *${budget} ${currency}*`,
+      {
+        reply_markup: { inline_keyboard: [[
+          { text: '✅ Одобрить',  callback_data: `mod:approve:${orderId}` },
+          { text: '❌ Отклонить', callback_data: `mod:reject:${orderId}` },
+        ]]},
+      }
+    ).catch(() => {})
 
     res.status(201).json(rows[0])
   } catch (err) {

@@ -18,6 +18,9 @@ const md = (s) => String(s ?? '').replace(/[_*`\[]/g, '\\$&')
 const isAdmin = (id) =>
   config.adminTelegramId && parseInt(id) === parseInt(config.adminTelegramId)
 
+// In-memory: adminTelegramId (string) → orderId (number) — ожидаем причину отклонения
+const pendingRejections = new Map()
+
 // ── Лог действий администратора ──────────────────────
 function adminLog(adminId, action, type = 'info', data = {}) {
   db.query(
@@ -90,11 +93,20 @@ router.post('/webhook', async (req, res) => {
     return
   }
 
+  // Если ожидаем причину отклонения заказа от администратора
+  if (isAdmin(fromId) && pendingRejections.has(String(fromId))) {
+    const orderId = pendingRejections.get(String(fromId))
+    pendingRejections.delete(String(fromId))
+    await rejectOrder(chatId, fromId, orderId, text)
+    return
+  }
+
   // Все команды ниже — только администратор
   if (!isAdmin(fromId)) return
   adminLog(fromId, `cmd: ${text.split(' ')[0]}`)
 
   if (text === '/admin')        { await sendAdminMenu(chatId);                      return }
+  if (text === '/moderation')   { await sendModeration(chatId);                     return }
   if (text === '/stats')        { await sendStats(chatId);                          return }
   if (text === '/frozen')       { await sendFrozen(chatId);                         return }
   if (text === '/health')       { await sendHealth(chatId);                         return }
@@ -159,12 +171,16 @@ async function sendAdminMenu(chatId) {
         { text: '❄️ Заморожено',           callback_data: 'admin:frozen' },
       ],
       [
+        { text: '🔍 Модерация',            callback_data: 'admin:moderation' },
         { text: '💸 Выводы',              callback_data: 'admin:withdrawals' },
-        { text: '😴 Без откликов',         callback_data: 'admin:lonely' },
       ],
       [
+        { text: '😴 Без откликов',         callback_data: 'admin:lonely' },
         { text: '📂 Категории',            callback_data: 'admin:categories' },
+      ],
+      [
         { text: '🔍 Дубликаты',            callback_data: 'admin:duplicates' },
+        { text: '🆘 Жалобы',              callback_data: 'admin:complaints' },
       ],
       [
         { text: '👥 Пользователи',         callback_data: 'admin:recent_users' },
@@ -180,7 +196,7 @@ async function sendAdminMenu(chatId) {
       ],
       [
         { text: '📢 Рассылка',             callback_data: 'admin:broadcast_prompt' },
-        { text: '🆘 Жалобы',              callback_data: 'admin:complaints' },
+        { text: '📜 Правила',             callback_data: 'admin:rules' },
       ],
       [
         { text: '🏥 Health',              callback_data: 'admin:health' },
@@ -195,16 +211,12 @@ async function sendAdminMenu(chatId) {
         { text: '⏳ Ожидают вывода',       callback_data: 'admin:pending' },
       ],
       [
-        { text: '📜 Правила',             callback_data: 'admin:rules' },
         { text: '🔒 Заблокированные',      callback_data: 'admin:blocked' },
-      ],
-      [
         { text: '📝 Лог действий',         callback_data: 'admin:adminlog' },
-        { text: '🔌 Сессии',              callback_data: 'admin:sessions' },
       ],
       [
+        { text: '🔌 Сессии',              callback_data: 'admin:sessions' },
         { text: '📈 Выручка сегодня',      callback_data: 'admin:revenue_today' },
-        { text: '📈 За неделю',            callback_data: 'admin:revenue_week' },
       ],
     ]},
   })
@@ -755,6 +767,146 @@ async function showComplaints(chatId) {
 }
 
 // ════════════════════════════════════════════════════
+//  МОДЕРАЦИЯ ЗАКАЗОВ
+// ════════════════════════════════════════════════════
+async function sendModeration(chatId) {
+  const { rows } = await db.query(`
+    SELECT o.id, o.title, o.category, o.budget, o.currency, o.description, o.created_at,
+           u.username, u.first_name
+    FROM orders o JOIN users u ON u.id = o.author_id
+    WHERE o.status = 'pending_review'
+    ORDER BY o.created_at ASC
+    LIMIT 10
+  `)
+
+  if (!rows.length) {
+    await tg('sendMessage', { chat_id: chatId, text: '✅ Очередь модерации пуста.' })
+    return
+  }
+
+  await tg('sendMessage', {
+    chat_id: chatId,
+    text: `🔍 *Очередь модерации: ${rows.length} шт.*`,
+    parse_mode: 'Markdown',
+  })
+
+  for (const o of rows) {
+    const who  = o.username ? `@${md(o.username)}` : md(o.first_name)
+    const desc = md((o.description || '').substring(0, 150))
+    const dt   = new Date(o.created_at).toLocaleString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    await tg('sendMessage', {
+      chat_id: chatId,
+      text:
+        `🔍 *#${o.id}* от ${who}\n` +
+        `📂 ${md(o.category)}   💰 ${o.budget} ${o.currency}\n` +
+        `📝 *${md(o.title)}*\n` +
+        `${desc}\n` +
+        `🕐 ${dt}`,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[
+        { text: '✅ Одобрить',  callback_data: `mod:approve:${o.id}` },
+        { text: '❌ Отклонить', callback_data: `mod:reject:${o.id}` },
+      ]] },
+    })
+  }
+}
+
+async function approveOrder(cq, orderId) {
+  const chatId = cq.message.chat.id
+
+  const { rows } = await db.query(
+    `UPDATE orders SET status = 'open', updated_at = NOW()
+     WHERE id = $1 AND status = 'pending_review'
+     RETURNING id, title, author_id`,
+    [orderId]
+  )
+  if (!rows[0]) {
+    await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Уже обработан', show_alert: true })
+    return
+  }
+  const order = rows[0]
+
+  // DB-уведомление
+  await db.query(
+    `INSERT INTO notifications (user_id, type, title, body, data)
+     VALUES ($1, 'order_approved', $2, $3, $4)`,
+    [
+      order.author_id,
+      'Заказ одобрен!',
+      '✅ Ваш заказ опубликован и доступен в ленте',
+      JSON.stringify({ order_id: order.id }),
+    ]
+  ).catch(() => {})
+
+  // Telegram-уведомление пользователю
+  const { rows: userRows } = await db.query(`SELECT telegram_id FROM users WHERE id = $1`, [order.author_id])
+  if (userRows[0]?.telegram_id) {
+    tg('sendMessage', {
+      chat_id: userRows[0].telegram_id,
+      text: `✅ *Ваш заказ одобрен и опубликован!*\n«${order.title}»`,
+      parse_mode: 'Markdown',
+    }).catch(() => {})
+  }
+
+  adminLog(cq.from.id, `approve order #${orderId}`, 'info')
+  await tg('editMessageReplyMarkup', { chat_id: chatId, message_id: cq.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {})
+  await tg('sendMessage', { chat_id: chatId, text: `✅ Заказ #${orderId} «${md(order.title)}» одобрен.`, parse_mode: 'Markdown' })
+  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: '✅ Одобрено' })
+}
+
+async function startOrderReject(cq, orderId) {
+  pendingRejections.set(String(cq.from.id), orderId)
+  await tg('answerCallbackQuery', { callback_query_id: cq.id })
+  await tg('sendMessage', {
+    chat_id: cq.message.chat.id,
+    text: `📝 *Укажите причину отклонения заказа #${orderId}:*\n_Ответьте на это сообщение или просто напишите причину._`,
+    parse_mode: 'Markdown',
+    reply_markup: { force_reply: true, selective: false },
+  })
+}
+
+async function rejectOrder(chatId, adminId, orderId, reason) {
+  const { rows } = await db.query(
+    `UPDATE orders SET status = 'rejected', rejection_reason = $1, updated_at = NOW()
+     WHERE id = $2 AND status = 'pending_review'
+     RETURNING id, title, author_id`,
+    [reason, orderId]
+  )
+  if (!rows[0]) {
+    await tg('sendMessage', { chat_id: chatId, text: `❌ Заказ #${orderId} не найден или уже обработан.` })
+    return
+  }
+  const order = rows[0]
+
+  // DB-уведомление
+  await db.query(
+    `INSERT INTO notifications (user_id, type, title, body, data)
+     VALUES ($1, 'order_rejected', $2, $3, $4)`,
+    [
+      order.author_id,
+      'Заказ отклонён',
+      `Причина: ${reason}`,
+      JSON.stringify({ order_id: order.id, reason }),
+    ]
+  ).catch(() => {})
+
+  // Telegram-уведомление пользователю
+  const { rows: userRows } = await db.query(`SELECT telegram_id FROM users WHERE id = $1`, [order.author_id])
+  if (userRows[0]?.telegram_id) {
+    tg('sendMessage', {
+      chat_id: userRows[0].telegram_id,
+      text:
+        `❌ *Ваш заказ отклонён*\n«${order.title}»\n\n*Причина:* ${reason}\n\n` +
+        `Исправьте заказ и создайте новый.`,
+      parse_mode: 'Markdown',
+    }).catch(() => {})
+  }
+
+  adminLog(adminId, `reject order #${orderId}`, 'warning', { reason })
+  await tg('sendMessage', { chat_id: chatId, text: `❌ Заказ #${orderId} отклонён. Пользователь уведомлён.` })
+}
+
+// ════════════════════════════════════════════════════
 //  ОДОБРЕНИЕ / ОТКЛОНЕНИЕ ВЫВОДА
 // ════════════════════════════════════════════════════
 async function approveWithdrawal(cq, requestId) {
@@ -814,6 +966,16 @@ async function handleCallback(cq) {
   const chatId = cq.message.chat.id
   const data   = cq.data
 
+  // Модерация заказов — только администратор
+  if (data.startsWith('mod:')) {
+    if (!isAdmin(cq.from.id)) return
+    const [, action, idStr] = data.split(':')
+    const id = parseInt(idStr)
+    if (action === 'approve') await approveOrder(cq, id)
+    if (action === 'reject')  await startOrderReject(cq, id)
+    return
+  }
+
   // Выводы — кнопки wd:approve/reject доступны только администратору
   if (data.startsWith('wd:')) {
     if (!isAdmin(cq.from.id)) return
@@ -828,6 +990,7 @@ async function handleCallback(cq) {
   adminLog(cq.from.id, `btn: ${data}`)
 
   const map = {
+    'admin:moderation':       () => sendModeration(chatId),
     'admin:stats':            () => sendStats(chatId),
     'admin:frozen':           () => sendFrozen(chatId),
     'admin:withdrawals':      () => sendWithdrawals(chatId),

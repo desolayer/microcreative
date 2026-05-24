@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { useTelegram } from '../hooks/useTelegram'
 import api from '../utils/api'
-import { profileAPI } from '../utils/api'
+import { profileAPI, ordersAPI } from '../utils/api'
 
 const NOTIF_LIST = [
   { key: 'notif_responses', icon: '🔔', label: 'Новые отклики на мои заказы' },
@@ -14,7 +14,7 @@ const NOTIF_LIST = [
 export default function ProfilePage() {
   const { user, balance } = useStore()
   const { haptic } = useTelegram()
-  const [view, setView]         = useState('profile') // 'profile' | 'support' | 'notifications'
+  const [view, setView]         = useState('profile') // 'profile' | 'support' | 'notifications' | 'orders'
   const [supportText, setSupportText] = useState('')
   const [sending, setSending]   = useState(false)
   const [sent, setSent]         = useState(false)
@@ -29,6 +29,20 @@ export default function ProfilePage() {
   })
   const [notifLoading, setNotifLoading] = useState(false)
   const [notifSaved, setNotifSaved]     = useState(false)
+
+  // My orders state
+  const [myOrders, setMyOrders]         = useState([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
+
+  // Load my orders when switching to that view
+  useEffect(() => {
+    if (view !== 'orders') return
+    setOrdersLoading(true)
+    ordersAPI.getMine()
+      .then(r => setMyOrders(r.data))
+      .catch(() => {})
+      .finally(() => setOrdersLoading(false))
+  }, [view])
 
   // Load notif settings when switching to that view
   useEffect(() => {
@@ -76,6 +90,64 @@ export default function ProfilePage() {
     } finally {
       setSending(false)
     }
+  }
+
+  // ── My orders view ──────────────────────────────────
+  if (view === 'orders') {
+    const STATUS_LABEL = {
+      pending_review: { text: '⏳ На модерации', color: '#f59e0b', bg: '#1e1510' },
+      open:           { text: '✅ Опубликован',  color: '#34d399', bg: '#0d1a14' },
+      in_progress:    { text: '🔄 В работе',     color: '#60a5fa', bg: '#0d1525' },
+      completed:      { text: '✔ Завершён',      color: '#a78bfa', bg: '#1a1333' },
+      rejected:       { text: '❌ Отклонён',     color: '#f87171', bg: '#1e0e0e' },
+      cancelled:      { text: '🚫 Отменён',      color: '#555',    bg: '#1a1a1a' },
+    }
+    return (
+      <div style={s.page}>
+        <div style={s.header}>
+          <button style={s.backBtn} onClick={() => setView('profile')}>
+            <i className="ti ti-arrow-left" style={{ fontSize: 18 }} />
+          </button>
+          <span style={s.headerTitle}>Мои заказы</span>
+          <div style={{ width: 36 }} />
+        </div>
+        <div style={s.body}>
+          {ordersLoading && (
+            <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 40 }}>
+              <div style={s.spinner} />
+            </div>
+          )}
+          {!ordersLoading && myOrders.length === 0 && (
+            <div style={{ color: '#444', fontSize: 14, textAlign: 'center', paddingTop: 40 }}>
+              Вы ещё не создавали заказов
+            </div>
+          )}
+          {!ordersLoading && myOrders.map(o => {
+            const st = STATUS_LABEL[o.status] || { text: o.status, color: '#555', bg: '#1a1a1a' }
+            return (
+              <div key={o.id} style={s.orderCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: '#e5e5e5', flex: 1, marginRight: 8 }}>
+                    {o.title}
+                  </span>
+                  <span style={{ ...s.statusBadge, background: st.bg, color: st.color }}>
+                    {st.text}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: '#555', marginBottom: o.rejection_reason ? 6 : 0 }}>
+                  {o.category} · {o.budget} {o.currency} · 💬 {o.responses_count || 0} откликов
+                </div>
+                {o.rejection_reason && (
+                  <div style={{ fontSize: 12, color: '#f87171', marginTop: 4, lineHeight: 1.4 }}>
+                    Причина: {o.rejection_reason}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
   }
 
   // ── Notifications view ──────────────────────────────
@@ -264,6 +336,13 @@ export default function ProfilePage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button
             style={s.supportBtn}
+            onClick={() => { haptic('light'); setView('orders') }}
+          >
+            <i className="ti ti-list" style={{ fontSize: 18, marginRight: 8 }} />
+            📋 Мои заказы
+          </button>
+          <button
+            style={s.supportBtn}
             onClick={() => { haptic('light'); setView('notifications') }}
           >
             <i className="ti ti-bell" style={{ fontSize: 18, marginRight: 8 }} />
@@ -349,6 +428,19 @@ const s = {
     background: '#fff', position: 'absolute',
     transition: 'transform 0.2s',
     boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+  },
+  spinner: {
+    width: 28, height: 28, borderRadius: '50%',
+    border: '2px solid #2a2a2a', borderTopColor: '#a78bfa',
+    animation: 'spin 0.7s linear infinite',
+  },
+  orderCard: {
+    background: '#171717', border: '0.5px solid #262626',
+    borderRadius: 12, padding: '12px 14px', marginBottom: 10,
+  },
+  statusBadge: {
+    fontSize: 11, fontWeight: 500, padding: '3px 8px',
+    borderRadius: 6, whiteSpace: 'nowrap', flexShrink: 0,
   },
   supportHint: { fontSize: 14, color: '#555', marginBottom: 16, lineHeight: 1.5 },
   textarea: {

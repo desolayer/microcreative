@@ -11,9 +11,10 @@ api.interceptors.request.use((config) => {
 })
 
 export const ordersAPI = {
-  getAll: (category) => api.get('/orders', { params: { category } }),
-  getOne: (id) => api.get(`/orders/${id}`),
-  create: (data) => api.post('/orders', data),
+  getAll:  (category) => api.get('/orders', { params: { category } }),
+  getMine: ()         => api.get('/orders/mine'),
+  getOne:  (id)       => api.get(`/orders/${id}`),
+  create:  (data)     => api.post('/orders', data),
   respond: (orderId, data) => api.post(`/orders/${orderId}/respond`, data),
   getResponses: (orderId) => api.get(`/orders/${orderId}/responses`),
   acceptResponse: (orderId, responseId) =>
