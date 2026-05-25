@@ -5,7 +5,21 @@ const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 const api = axios.create({ baseURL: BASE_URL })
 
 api.interceptors.request.use((config) => {
-  const initData = window.Telegram?.WebApp?.initData || ''
+  const tg       = window.Telegram?.WebApp
+  const initData = tg?.initData || ''
+
+  // Диагностика: что видит браузер
+  if (!initData) {
+    console.warn('[MicroCreative] initData пустой!', {
+      hasTelegram:  !!window.Telegram,
+      hasWebApp:    !!tg,
+      initData:     tg?.initData,
+      platform:     tg?.platform,
+      version:      tg?.version,
+      url:          window.location.href,
+    })
+  }
+
   config.headers['X-Telegram-Init-Data'] = initData
   return config
 })
