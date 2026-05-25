@@ -4,6 +4,7 @@ import { config } from '../config/env.js'
 import { db } from '../config/database.js'
 import { refundEscrow } from '../services/escrow.js'
 import { getActiveConnectionsCount } from '../services/websocket.js'
+import { createAuthToken } from './auth.js'
 
 const router = Router()
 
@@ -179,16 +180,20 @@ router.post('/webhook', async (req, res) => {
     if (isPermanent || isTempBanned) return
   }
 
-  // /start — с постоянной клавиатурой
+  // /start — с постоянной клавиатурой + кнопкой входа с токеном
   if (text.startsWith('/start')) {
     console.log(`[BOT] /start id=${fromId} @${uname}`)
+    const token    = await createAuthToken(fromId).catch(() => null)
+    const loginUrl = token
+      ? `${config.frontendUrl}?token=${token}`
+      : config.frontendUrl
+
     await tg('sendMessage', {
       chat_id: chatId,
       text:
         `👋 Добро пожаловать в *MicroCreative*!\n\n` +
-        `🆔 Ваш Telegram ID: \`${fromId}\`\n\n` +
         `Биржа творческих микрозаказов — дизайн, тексты, музыка и не только.\n\n` +
-        `Нажмите кнопку ниже чтобы открыть приложение 👇`,
+        `Нажмите *«✅ Войти в приложение»* для входа 👇`,
       parse_mode: 'Markdown',
       reply_markup: {
         keyboard: [
@@ -198,6 +203,38 @@ router.post('/webhook', async (req, res) => {
         ],
         resize_keyboard: true,
         persistent: true,
+      },
+    })
+
+    await tg('sendMessage', {
+      chat_id: chatId,
+      text: '🔑 Ваша ссылка для входа действует *5 минут*:',
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '✅ Войти в приложение', web_app: { url: loginUrl } },
+        ]],
+      },
+    })
+    return
+  }
+
+  // /auth — сгенерировать новый токен для входа
+  if (text.startsWith('/auth')) {
+    const token    = await createAuthToken(fromId).catch(() => null)
+    if (!token) {
+      await tg('sendMessage', { chat_id: chatId, text: '❌ Не удалось создать токен. Попробуйте ещё раз.' })
+      return
+    }
+    const loginUrl = `${config.frontendUrl}?token=${token}`
+    await tg('sendMessage', {
+      chat_id: chatId,
+      text: '🔑 Новая ссылка для входа готова. Действует *5 минут*:',
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '✅ Войти в приложение', web_app: { url: loginUrl } },
+        ]],
       },
     })
     return

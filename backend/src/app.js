@@ -23,6 +23,7 @@ import profileRouter       from './routes/profile.js'
 import notificationsRouter from './routes/notifications.js'
 import botRouter           from './routes/bot.js'
 import supportRouter       from './routes/support.js'
+import authRouter, { ensureAuthTokensTable } from './routes/auth.js'
 
 const app = express()
 
@@ -57,6 +58,7 @@ app.use('/api', limiter)
 // ── Публичные эндпоинты (без авторизации) ────────────
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/bot',      botRouter)
+app.use('/api/auth',     authRouter)   // token exchange + JWT refresh
 
 // Статус приложения — maintenance mode
 app.get('/api/status', async (req, res) => {
@@ -106,9 +108,15 @@ app.use(errorHandler)
 const server = createServer(app)
 setupWebSocket(server)
 
-server.listen(config.port, () => {
+server.listen(config.port, async () => {
   console.log(`MicroCreative backend running on port ${config.port}`)
   console.log(`Environment: ${config.nodeEnv}`)
+
+  // Создаём таблицу auth_tokens если не существует
+  await ensureAuthTokensTable()
+    .then(() => console.log('[DB] auth_tokens table ready'))
+    .catch(err => console.error('[DB] auth_tokens migration error:', err))
+
   startScheduler()
 
   // Уведомляем администратора что бэкенд поднялся

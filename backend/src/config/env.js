@@ -21,6 +21,7 @@ export const config = {
   backendUrl:  process.env.BACKEND_URL  || 'http://localhost:3000',
   frontendUrl: process.env.FRONTEND_URL || 'https://microcreative-extract.vercel.app',
   adminTelegramId: process.env.ADMIN_TELEGRAM_ID || null,
+  jwtSecret: process.env.JWT_SECRET || 'dev_jwt_secret_change_in_production',
 }
 
 // Проверяем обязательные переменные

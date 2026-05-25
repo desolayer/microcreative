@@ -4,30 +4,43 @@ const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 
 const api = axios.create({ baseURL: BASE_URL })
 
-/**
- * Читает Telegram initData тремя способами по приоритету:
- *  1. window.Telegram.WebApp.initData  (SDK уже разобрал)
- *  2. URL ?tgWebAppData=...            (SDK ещё не успел / base='./' edge case)
- *  3. URL #tgWebAppData=...            (hash-based передача в старых клиентах)
- *
- * Telegram всегда добавляет tgWebAppData к URL когда открывает Mini App.
- * Чтение напрямую из URL устраняет любые race conditions SDK.
- */
-function getTelegramInitData() {
-  // 1. Официальный SDK
+// ── JWT хелперы ───────────────────────────────────────────
+const JWT_KEY = 'mc_jwt'
+
+export function getJwt()        { return localStorage.getItem(JWT_KEY) || '' }
+export function setJwt(token)   { localStorage.setItem(JWT_KEY, token) }
+export function clearJwt()      { localStorage.removeItem(JWT_KEY) }
+
+/** Декодирует JWT без проверки подписи (только для чтения exp на клиенте) */
+export function decodeJwt(token) {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    return JSON.parse(atob(b64))
+  } catch (_) { return null }
+}
+
+/** Возвращает true если JWT существует и ещё не истёк (с запасом 60с) */
+export function isJwtValid() {
+  const token = getJwt()
+  if (!token) return false
+  const payload = decodeJwt(token)
+  if (!payload?.exp) return false
+  return payload.exp > Math.floor(Date.now() / 1000) + 60
+}
+
+// ── Читаем Telegram initData (3 источника, fallback) ─────
+export function getTelegramInitData() {
   const sdkData = window.Telegram?.WebApp?.initData
   if (sdkData) return sdkData
 
-  // 2. URL query string — ?tgWebAppData=<urlencoded>
   try {
-    const qp = new URLSearchParams(window.location.search)
+    const qp  = new URLSearchParams(window.location.search)
     const raw = qp.get('tgWebAppData')
     if (raw) return decodeURIComponent(raw.replace(/\+/g, ' '))
   } catch (_) {}
 
-  // 3. URL hash — #tgWebAppData=<urlencoded>
   try {
-    const hp = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const hp  = new URLSearchParams(window.location.hash.replace(/^#/, ''))
     const raw = hp.get('tgWebAppData')
     if (raw) return decodeURIComponent(raw.replace(/\+/g, ' '))
   } catch (_) {}
@@ -35,14 +48,29 @@ function getTelegramInitData() {
   return ''
 }
 
-api.interceptors.request.use((config) => {
-  const initData = getTelegramInitData()
-  config.headers['X-Telegram-Init-Data'] = initData
-  return config
+// ── Request interceptor: JWT → initData fallback ──────────
+api.interceptors.request.use((cfg) => {
+  const jwt = getJwt()
+  if (jwt) {
+    cfg.headers['Authorization'] = `Bearer ${jwt}`
+  } else {
+    const initData = getTelegramInitData()
+    if (initData) cfg.headers['X-Telegram-Init-Data'] = initData
+  }
+  return cfg
 })
 
-// Экспортируем для использования в App.jsx (waitForInitData)
-export { getTelegramInitData }
+// ── Response interceptor: 401 → clearJwt ─────────────────
+api.interceptors.response.use(
+  res => res,
+  err => {
+    if (err.response?.status === 401 && getJwt()) {
+      // JWT истёк или отозван — сбрасываем, пользователь увидит экран входа
+      clearJwt()
+    }
+    return Promise.reject(err)
+  }
+)
 
 export const ordersAPI = {
   getAll:  (category) => api.get('/orders', { params: { category } }),
@@ -77,7 +105,6 @@ export const walletAPI = {
   getWithdrawals:   () => api.get('/wallet/withdrawals'),
 }
 
-// asset: 'TON' | 'USDT' | 'BTC' | 'ETH' | 'LTC' | 'BNB' | 'TRX' | 'USDC' | 'XTR'
 export const paymentsAPI = {
   createInvoice: (orderId, asset, amount) =>
     api.post('/payments/cryptobot', { orderId, asset, amount }),

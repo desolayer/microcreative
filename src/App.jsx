@@ -9,82 +9,109 @@ import ResponsesPage from './pages/ResponsesPage'
 import DealsPage from './pages/DealsPage'
 import WalletPage from './pages/WalletPage'
 import NotificationsPage from './pages/NotificationsPage'
-import { profileAPI, notificationsAPI, walletAPI, getTelegramInitData } from './utils/api'
+import {
+  profileAPI, notificationsAPI, walletAPI,
+  getJwt, setJwt, isJwtValid,
+} from './utils/api'
 import { useStore } from './store/useStore'
 import api from './utils/api'
 
+// Читаем ?token= из URL (одноразовый токен от бота)
+function getUrlToken() {
+  return new URLSearchParams(window.location.search).get('token') || ''
+}
+
+// Убираем ?token= из адресной строки (чтобы токен нельзя было переиспользовать)
+function removeUrlToken() {
+  const url = new URL(window.location.href)
+  url.searchParams.delete('token')
+  window.history.replaceState({}, '', url.toString())
+}
+
 export default function App() {
-  const [currentPage, setCurrentPage]     = useState('feed')
-  const [pageParams, setPageParams]       = useState(null)
-  const [feedKey, setFeedKey]             = useState(0)   // инкремент → FeedPage перемонтируется
-  const [maintenance, setMaintenance]     = useState(false)
-  const [banInfo, setBanInfo]             = useState(null)
-  const [unauthorized, setUnauthorized]   = useState(false)
+  const [currentPage, setCurrentPage]   = useState('feed')
+  const [pageParams, setPageParams]     = useState(null)
+  const [feedKey, setFeedKey]           = useState(0)
+  const [maintenance, setMaintenance]   = useState(false)
+  const [banInfo, setBanInfo]           = useState(null)
+  const [authState, setAuthState]       = useState('loading')  // loading | ok | noauth | error
   const { setUser, setBalance, setUnreadCount } = useStore()
 
-  // Инициализация: загружаем статус + профиль, баланс, счётчик уведомлений
   useEffect(() => {
-    // getTelegramInitData читает initData тремя способами:
-    // SDK → URL query params → URL hash.
-    // Если после загрузки страницы initData ещё не доступен через SDK
-    // (Telegram Desktop/Web передаёт через postMessage асинхронно),
-    // ждём до 2 секунд.
-    const waitAndLoad = async () => {
-      let initData = getTelegramInitData()
+    const init = async () => {
+      // ── 1. Проверяем режим обслуживания (публичный эндпоинт) ──
+      api.get('/status')
+        .then(r => { if (r.data.maintenance) setMaintenance(true) })
+        .catch(() => {})
 
-      if (!initData) {
-        // Ждём до 2с с шагом 100мс (для Desktop/Web клиентов)
-        for (let i = 0; i < 20; i++) {
-          await new Promise(r => setTimeout(r, 100))
-          initData = getTelegramInitData()
-          if (initData) break
+      // ── 2. Обмен одноразового токена из URL на JWT ─────────────
+      const urlToken = getUrlToken()
+      if (urlToken) {
+        removeUrlToken()
+        try {
+          const r = await api.post('/auth/token', { token: urlToken })
+          setJwt(r.data.token)
+          setUser(r.data.user)
+          console.log('[AUTH] token exchange success, JWT saved')
+        } catch (e) {
+          const d = e?.response?.data
+          if (e?.response?.status === 403 && d?.is_permanent !== undefined) {
+            setBanInfo(d)
+            return
+          }
+          console.warn('[AUTH] token exchange failed:', d?.error)
+          // Токен не сработал — пробуем старый JWT или показываем вход
         }
       }
 
-    // Проверяем режим обслуживания
-    api.get('/status')
-      .then(r => { if (r.data.maintenance) setMaintenance(true) })
-      .catch(() => {})
-
-    profileAPI.getMe()
-      .then(r => setUser(r.data))
-      .catch(e => {
-        const status = e?.response?.status
-        const d = e?.response?.data
-        // Не авторизован — открыт не через Telegram
-        if (status === 401) {
-          setUnauthorized(true)
+      // ── 3. Проверяем существующий JWT ─────────────────────────
+      if (isJwtValid()) {
+        try {
+          const r = await profileAPI.getMe()
+          setUser(r.data)
+          setAuthState('ok')
+        } catch (e) {
+          const status = e?.response?.status
+          const d      = e?.response?.data
+          if (status === 403 && d?.is_permanent !== undefined) {
+            setBanInfo(d); return
+          }
+          // JWT невалидный → уже сброшен в interceptor
+          setAuthState('noauth')
           return
         }
-        // Проверяем статус бана (403 с ban-info)
-        if (status === 403 && d && d.is_permanent !== undefined) {
-          setBanInfo(d)
-        }
-        // dev-режим без Telegram — остальное не критично
-      })
+      } else if (urlToken) {
+        // JWT был получен через обмен — не нужно второй запрос /profile/me
+        setAuthState('ok')
+      } else {
+        // Нет JWT и нет токена в URL
+        setAuthState('noauth')
+        return
+      }
 
-    walletAPI.getBalance()
-      .then(r => {
-        const d = r.data
-        setBalance({
-          rub:          parseFloat(d.balance_rub)   || 0,
-          usdt:         parseFloat(d.balance_usdt)  || 0,
-          ton:          parseFloat(d.balance_ton)   || 0,
-          stars:        parseInt(d.balance_stars)   || 0,
-          frozen_rub:   parseFloat(d.frozen_rub)    || 0,
-          frozen_usdt:  parseFloat(d.frozen_usdt)   || 0,
-          frozen_ton:   parseFloat(d.frozen_ton)    || 0,
-          frozen_stars: parseInt(d.frozen_stars)    || 0,
+      // ── 4. Загружаем доп. данные (параллельно) ────────────────
+      walletAPI.getBalance()
+        .then(r => {
+          const d = r.data
+          setBalance({
+            rub:          parseFloat(d.balance_rub)   || 0,
+            usdt:         parseFloat(d.balance_usdt)  || 0,
+            ton:          parseFloat(d.balance_ton)   || 0,
+            stars:        parseInt(d.balance_stars)   || 0,
+            frozen_rub:   parseFloat(d.frozen_rub)    || 0,
+            frozen_usdt:  parseFloat(d.frozen_usdt)   || 0,
+            frozen_ton:   parseFloat(d.frozen_ton)    || 0,
+            frozen_stars: parseInt(d.frozen_stars)    || 0,
+          })
         })
-      })
-      .catch(() => {})
+        .catch(() => {})
 
-    notificationsAPI.getAll()
-      .then(r => setUnreadCount(r.data.unread || 0))
-      .catch(() => {})
+      notificationsAPI.getAll()
+        .then(r => setUnreadCount(r.data.unread || 0))
+        .catch(() => {})
     }
 
-    waitAndLoad()
+    init()
   }, [])
 
   const navigate = (page, params = null) => {
@@ -168,25 +195,42 @@ export default function App() {
 
   const hideNav = ['order-detail', 'deal', 'responses', 'payment', 'respond', 'create', 'notifications'].includes(currentPage)
 
-  // Не открыт через Telegram — показываем инструкцию
-  if (unauthorized) {
+  // Загрузка — показываем спиннер
+  if (authState === 'loading') {
+    return (
+      <div style={{
+        minHeight: '100vh', background: '#0f0f0f', display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+      }}>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{
+          width: 36, height: 36, borderRadius: '50%',
+          border: '3px solid #2a2a2a', borderTopColor: '#a78bfa',
+          animation: 'spin 0.8s linear infinite',
+        }} />
+      </div>
+    )
+  }
+
+  // Нет авторизации — предлагаем войти через бот
+  if (authState === 'noauth') {
     return (
       <div style={{
         minHeight: '100vh', background: '#0f0f0f', display: 'flex',
         flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         color: '#e5e5e5', textAlign: 'center', padding: 32,
       }}>
-        <div style={{ fontSize: 56 }}>✈️</div>
+        <div style={{ fontSize: 56 }}>🔑</div>
         <div style={{ fontSize: 22, fontWeight: 700, marginTop: 16, marginBottom: 8 }}>
-          Откройте через Telegram
+          Войти в MicroCreative
         </div>
-        <div style={{ fontSize: 15, color: '#888', marginBottom: 16, lineHeight: 1.5 }}>
-          MicroCreative работает только внутри Telegram.
+        <div style={{ fontSize: 15, color: '#888', marginBottom: 24, lineHeight: 1.5 }}>
+          Откройте бота в Telegram — он пришлёт ссылку для авторизации.
         </div>
         <a
           href="https://t.me/microcreative_bot"
           style={{
-            display: 'inline-block', marginTop: 8,
+            display: 'inline-block',
             padding: '12px 28px', borderRadius: 12,
             background: '#a78bfa', color: '#0f0f0f',
             fontWeight: 700, fontSize: 15, textDecoration: 'none',
