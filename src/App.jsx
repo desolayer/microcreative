@@ -19,6 +19,7 @@ export default function App() {
   const [feedKey, setFeedKey]             = useState(0)   // инкремент → FeedPage перемонтируется
   const [maintenance, setMaintenance]     = useState(false)
   const [banInfo, setBanInfo]             = useState(null)
+  const [unauthorized, setUnauthorized]   = useState(false)
   const { setUser, setBalance, setUnreadCount } = useStore()
 
   // Инициализация: загружаем статус + профиль, баланс, счётчик уведомлений
@@ -31,9 +32,15 @@ export default function App() {
     profileAPI.getMe()
       .then(r => setUser(r.data))
       .catch(e => {
-        // Проверяем статус бана (403 с ban-info)
+        const status = e?.response?.status
         const d = e?.response?.data
-        if (e?.response?.status === 403 && d && d.is_permanent !== undefined) {
+        // Не авторизован — открыт не через Telegram
+        if (status === 401) {
+          setUnauthorized(true)
+          return
+        }
+        // Проверяем статус бана (403 с ban-info)
+        if (status === 403 && d && d.is_permanent !== undefined) {
           setBanInfo(d)
         }
         // dev-режим без Telegram — остальное не критично
@@ -140,6 +147,36 @@ export default function App() {
   }
 
   const hideNav = ['order-detail', 'deal', 'responses', 'payment', 'respond', 'create', 'notifications'].includes(currentPage)
+
+  // Не открыт через Telegram — показываем инструкцию
+  if (unauthorized) {
+    return (
+      <div style={{
+        minHeight: '100vh', background: '#0f0f0f', display: 'flex',
+        flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        color: '#e5e5e5', textAlign: 'center', padding: 32,
+      }}>
+        <div style={{ fontSize: 56 }}>✈️</div>
+        <div style={{ fontSize: 22, fontWeight: 700, marginTop: 16, marginBottom: 8 }}>
+          Откройте через Telegram
+        </div>
+        <div style={{ fontSize: 15, color: '#888', marginBottom: 16, lineHeight: 1.5 }}>
+          MicroCreative работает только внутри Telegram.
+        </div>
+        <a
+          href="https://t.me/microcreative_bot"
+          style={{
+            display: 'inline-block', marginTop: 8,
+            padding: '12px 28px', borderRadius: 12,
+            background: '#a78bfa', color: '#0f0f0f',
+            fontWeight: 700, fontSize: 15, textDecoration: 'none',
+          }}
+        >
+          Открыть бот
+        </a>
+      </div>
+    )
+  }
 
   // Бан — показываем заглушку
   if (banInfo) {

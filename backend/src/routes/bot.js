@@ -238,6 +238,18 @@ router.post('/webhook', async (req, res) => {
   }
 
   // ── Постоянные кнопки клавиатуры (для всех пользователей) ───
+  if (text === '🚀 Открыть MicroCreative') {
+    await tg('sendMessage', {
+      chat_id: chatId,
+      text: '👇 Нажмите кнопку ниже, чтобы открыть приложение:',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '🚀 Открыть MicroCreative', web_app: { url: config.frontendUrl } },
+        ]],
+      },
+    })
+    return
+  }
   if (text === '📜 Правила') { await sendRulesUser(chatId); return }
   if (text === '📖 Инструкция') { await sendInstructions(chatId); return }
   if (text === '🆘 Поддержка') { await startSupport(chatId, fromId); return }

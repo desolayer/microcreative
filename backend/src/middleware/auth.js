@@ -3,12 +3,13 @@ import { config } from '../config/env.js'
 import { db } from '../config/database.js'
 import { notifyAdmin } from '../services/adminNotify.js'
 
+// Возвращает { user } при успехе или { error: string } при ошибке
 function validateTelegramInitData(initData) {
-  if (!initData) return null
+  if (!initData) return { error: 'empty' }
 
   const params = new URLSearchParams(initData)
   const hash = params.get('hash')
-  if (!hash) return null
+  if (!hash) return { error: 'no_hash' }
 
   params.delete('hash')
   const dataCheckString = [...params.entries()]
@@ -26,19 +27,22 @@ function validateTelegramInitData(initData) {
     .update(dataCheckString)
     .digest('hex')
 
-  if (expectedHash !== hash) return null
+  if (expectedHash !== hash) return { error: 'bad_hash' }
 
   const authDate = parseInt(params.get('auth_date') || '0')
   const now = Math.floor(Date.now() / 1000)
-  if (now - authDate > 86400) return null
+  const ageSec = now - authDate
+  // 7 суток — HMAC уже гарантирует подлинность; длинное окно нужно для
+  // пользователей, которые держат Telegram открытым много часов
+  if (ageSec > 604800) return { error: `expired:${ageSec}s` }
 
   const userRaw = params.get('user')
-  if (!userRaw) return null
+  if (!userRaw) return { error: 'no_user' }
 
   try {
-    return JSON.parse(userRaw)
+    return { user: JSON.parse(userRaw) }
   } catch {
-    return null
+    return { error: 'bad_user_json' }
   }
 }
 
@@ -56,13 +60,14 @@ export async function authMiddleware(req, res, next) {
     return next()
   }
 
-  const telegramUser = validateTelegramInitData(initData)
-  if (!telegramUser) {
+  const result = validateTelegramInitData(initData)
+  if (result.error) {
+    console.log(`[AUTH 401] ${result.error} — ${req.method} ${req.path}`)
     return res.status(401).json({ error: 'Unauthorized: invalid Telegram initData' })
   }
 
   try {
-    const user = await getOrCreateUser(telegramUser)
+    const user = await getOrCreateUser(result.user)
 
     // Авто-снятие истёкшего временного бана
     if (user.banned_until && new Date(user.banned_until) <= new Date()) {
