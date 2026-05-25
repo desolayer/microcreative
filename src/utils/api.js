@@ -4,25 +4,45 @@ const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 
 const api = axios.create({ baseURL: BASE_URL })
 
+/**
+ * Читает Telegram initData тремя способами по приоритету:
+ *  1. window.Telegram.WebApp.initData  (SDK уже разобрал)
+ *  2. URL ?tgWebAppData=...            (SDK ещё не успел / base='./' edge case)
+ *  3. URL #tgWebAppData=...            (hash-based передача в старых клиентах)
+ *
+ * Telegram всегда добавляет tgWebAppData к URL когда открывает Mini App.
+ * Чтение напрямую из URL устраняет любые race conditions SDK.
+ */
+function getTelegramInitData() {
+  // 1. Официальный SDK
+  const sdkData = window.Telegram?.WebApp?.initData
+  if (sdkData) return sdkData
+
+  // 2. URL query string — ?tgWebAppData=<urlencoded>
+  try {
+    const qp = new URLSearchParams(window.location.search)
+    const raw = qp.get('tgWebAppData')
+    if (raw) return decodeURIComponent(raw.replace(/\+/g, ' '))
+  } catch (_) {}
+
+  // 3. URL hash — #tgWebAppData=<urlencoded>
+  try {
+    const hp = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const raw = hp.get('tgWebAppData')
+    if (raw) return decodeURIComponent(raw.replace(/\+/g, ' '))
+  } catch (_) {}
+
+  return ''
+}
+
 api.interceptors.request.use((config) => {
-  const tg       = window.Telegram?.WebApp
-  const initData = tg?.initData || ''
-
-  // Диагностика: что видит браузер
-  if (!initData) {
-    console.warn('[MicroCreative] initData пустой!', {
-      hasTelegram:  !!window.Telegram,
-      hasWebApp:    !!tg,
-      initData:     tg?.initData,
-      platform:     tg?.platform,
-      version:      tg?.version,
-      url:          window.location.href,
-    })
-  }
-
+  const initData = getTelegramInitData()
   config.headers['X-Telegram-Init-Data'] = initData
   return config
 })
+
+// Экспортируем для использования в App.jsx (waitForInitData)
+export { getTelegramInitData }
 
 export const ordersAPI = {
   getAll:  (category) => api.get('/orders', { params: { category } }),

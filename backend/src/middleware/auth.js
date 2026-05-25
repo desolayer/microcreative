@@ -46,12 +46,6 @@ function validateTelegramInitData(initData) {
   }
 }
 
-// ═══════════ ДИАГНОСТИКА — УДАЛИТЬ ПОСЛЕ ПРОВЕРКИ ═══════════
-// Если true — запросы без initData пропускаются как guest-пользователь.
-// Позволяет убедиться что остальной код (БД, роуты, фронт) работает.
-const ALLOW_EMPTY_AUTH = true
-// ════════════════════════════════════════════════════════════
-
 export async function authMiddleware(req, res, next) {
   // Заголовок может прийти как undefined (отсутствует) или '' (пустая строка)
   const rawHeader = req.headers['x-telegram-init-data']
@@ -70,29 +64,9 @@ export async function authMiddleware(req, res, next) {
 
   const result = validateTelegramInitData(initData)
   if (result.error) {
-    // absent = заголовок не пришёл вообще, empty = пришёл пустым
     const headerState = rawHeader === undefined ? 'absent' : 'empty'
     const logReason   = result.error === 'empty' ? headerState : result.error
     console.log(`[AUTH 401] ${logReason} — ${req.method} ${req.path}`)
-
-    // ── ДИАГНОСТИКА: пропускаем пустой auth как guest ─────
-    if (result.error === 'empty' && ALLOW_EMPTY_AUTH) {
-      console.warn(`[AUTH DIAG] bypassing empty initData → guest — ${req.method} ${req.path}`)
-      try {
-        const guestUser = await getOrCreateUser({
-          id: 99999,
-          first_name: 'DiagGuest',
-          last_name: null,
-          username: 'diag_guest',
-        })
-        req.user = guestUser
-        return next()
-      } catch (err) {
-        return next(err)
-      }
-    }
-    // ─────────────────────────────────────────────────────
-
     return res.status(401).json({ error: 'Unauthorized: invalid Telegram initData' })
   }
 

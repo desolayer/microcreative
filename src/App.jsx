@@ -9,7 +9,7 @@ import ResponsesPage from './pages/ResponsesPage'
 import DealsPage from './pages/DealsPage'
 import WalletPage from './pages/WalletPage'
 import NotificationsPage from './pages/NotificationsPage'
-import { profileAPI, notificationsAPI, walletAPI } from './utils/api'
+import { profileAPI, notificationsAPI, walletAPI, getTelegramInitData } from './utils/api'
 import { useStore } from './store/useStore'
 import api from './utils/api'
 
@@ -24,19 +24,23 @@ export default function App() {
 
   // Инициализация: загружаем статус + профиль, баланс, счётчик уведомлений
   useEffect(() => {
-    // На Telegram Desktop/Web initData приходит через postMessage асинхронно.
-    // Ждём до 3 секунд, потом делаем запросы (если не в Telegram — всё равно 401).
-    const waitForInitData = () => new Promise((resolve) => {
-      const tg = window.Telegram?.WebApp
-      if (!tg || tg.initData) return resolve()   // уже есть или не в Telegram
-      let elapsed = 0
-      const timer = setInterval(() => {
-        elapsed += 100
-        if (tg.initData || elapsed >= 3000) { clearInterval(timer); resolve() }
-      }, 100)
-    })
+    // getTelegramInitData читает initData тремя способами:
+    // SDK → URL query params → URL hash.
+    // Если после загрузки страницы initData ещё не доступен через SDK
+    // (Telegram Desktop/Web передаёт через postMessage асинхронно),
+    // ждём до 2 секунд.
+    const waitAndLoad = async () => {
+      let initData = getTelegramInitData()
 
-    waitForInitData().then(() => {
+      if (!initData) {
+        // Ждём до 2с с шагом 100мс (для Desktop/Web клиентов)
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 100))
+          initData = getTelegramInitData()
+          if (initData) break
+        }
+      }
+
     // Проверяем режим обслуживания
     api.get('/status')
       .then(r => { if (r.data.maintenance) setMaintenance(true) })
@@ -78,7 +82,9 @@ export default function App() {
     notificationsAPI.getAll()
       .then(r => setUnreadCount(r.data.unread || 0))
       .catch(() => {})
-    }) // end waitForInitData
+    }
+
+    waitAndLoad()
   }, [])
 
   const navigate = (page, params = null) => {
