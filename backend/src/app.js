@@ -32,8 +32,16 @@ app.set('trust proxy', 1)
 // ── Базовые мидлвары ─────────────────────────────────
 app.use(helmet())
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
-  credentials: true,
+  // Разрешаем любой origin — безопасность обеспечивается HMAC-валидацией initData,
+  // а не CORS (Telegram Mini Apps открываются из разных origin-контекстов)
+  origin: true,
+  credentials: false,
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Telegram-Init-Data',
+  ],
+  exposedHeaders: ['Content-Type'],
 }))
 app.use(morgan('dev'))
 app.use(express.json({ limit: '5mb' }))

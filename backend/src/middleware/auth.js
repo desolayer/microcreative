@@ -19,7 +19,7 @@ function validateTelegramInitData(initData) {
 
   const secretKey = crypto
     .createHmac('sha256', 'WebAppData')
-    .update(config.telegramBotToken)
+    .update(config.telegramBotToken.trim())  // trim — на случай пробелов в env
     .digest()
 
   const expectedHash = crypto
@@ -47,7 +47,9 @@ function validateTelegramInitData(initData) {
 }
 
 export async function authMiddleware(req, res, next) {
-  const initData = req.headers['x-telegram-init-data']
+  // Заголовок может прийти как undefined (отсутствует) или '' (пустая строка)
+  const rawHeader = req.headers['x-telegram-init-data']
+  const initData  = rawHeader || ''
 
   if (config.nodeEnv === 'development' && !initData) {
     const devUser = await getOrCreateUser({
@@ -62,7 +64,10 @@ export async function authMiddleware(req, res, next) {
 
   const result = validateTelegramInitData(initData)
   if (result.error) {
-    console.log(`[AUTH 401] ${result.error} — ${req.method} ${req.path}`)
+    // absent = заголовок не пришёл вообще, empty = пришёл пустым
+    const headerState = rawHeader === undefined ? 'absent' : 'empty'
+    const logReason   = result.error === 'empty' ? headerState : result.error
+    console.log(`[AUTH 401] ${logReason} — ${req.method} ${req.path}`)
     return res.status(401).json({ error: 'Unauthorized: invalid Telegram initData' })
   }
 

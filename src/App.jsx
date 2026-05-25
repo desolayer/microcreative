@@ -24,6 +24,19 @@ export default function App() {
 
   // Инициализация: загружаем статус + профиль, баланс, счётчик уведомлений
   useEffect(() => {
+    // На Telegram Desktop/Web initData приходит через postMessage асинхронно.
+    // Ждём до 3 секунд, потом делаем запросы (если не в Telegram — всё равно 401).
+    const waitForInitData = () => new Promise((resolve) => {
+      const tg = window.Telegram?.WebApp
+      if (!tg || tg.initData) return resolve()   // уже есть или не в Telegram
+      let elapsed = 0
+      const timer = setInterval(() => {
+        elapsed += 100
+        if (tg.initData || elapsed >= 3000) { clearInterval(timer); resolve() }
+      }, 100)
+    })
+
+    waitForInitData().then(() => {
     // Проверяем режим обслуживания
     api.get('/status')
       .then(r => { if (r.data.maintenance) setMaintenance(true) })
@@ -65,6 +78,7 @@ export default function App() {
     notificationsAPI.getAll()
       .then(r => setUnreadCount(r.data.unread || 0))
       .catch(() => {})
+    }) // end waitForInitData
   }, [])
 
   const navigate = (page, params = null) => {
