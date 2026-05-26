@@ -38,12 +38,10 @@ const upload = multer({
 
 // ── Миграция: добавляем колонки для файлов в messages ─
 export async function ensureMessagesFileColumns() {
-  await db.query(`
-    ALTER TABLE messages
-      ADD COLUMN IF NOT EXISTS file_url  TEXT,
-      ADD COLUMN IF NOT EXISTS file_name TEXT,
-      ADD COLUMN IF NOT EXISTS file_type TEXT
-  `)
+  // Три отдельных ALTER — безопаснее на всех версиях PostgreSQL
+  await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_url  TEXT`)
+  await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_name TEXT`)
+  await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_type TEXT`)
 }
 
 // GET /api/deals — все сделки текущего пользователя
