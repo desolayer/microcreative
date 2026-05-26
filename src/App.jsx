@@ -11,7 +11,7 @@ import WalletPage from './pages/WalletPage'
 import NotificationsPage from './pages/NotificationsPage'
 import {
   profileAPI, notificationsAPI, walletAPI,
-  getJwt, setJwt, isJwtValid,
+  getJwt, setJwt, hasJwt,
 } from './utils/api'
 import { useStore } from './store/useStore'
 import api from './utils/api'
@@ -60,36 +60,28 @@ export default function App() {
             return
           }
           console.warn('[AUTH] token exchange failed:', d?.error)
-          // Токен не сработал — пробуем старый JWT или показываем вход
+          // Токен не сработал — падаем на проверку localStorage
         }
       }
 
-      // ── 3. Проверяем существующий JWT ─────────────────────────
-      if (isJwtValid()) {
-        try {
-          const r = await profileAPI.getMe()
-          setUser(r.data)
-          setAuthState('ok')
-        } catch (e) {
-          const status = e?.response?.status
-          const d      = e?.response?.data
-          if (status === 403 && d?.is_permanent !== undefined) {
-            setBanInfo(d); return
-          }
-          // JWT невалидный → уже сброшен в interceptor
-          setAuthState('noauth')
-          return
-        }
-      } else if (urlToken) {
-        // JWT был получен через обмен — не нужно второй запрос /profile/me
-        setAuthState('ok')
-      } else {
-        // Нет JWT и нет токена в URL
+      // ── 3. JWT в localStorage → сразу показываем приложение ───
+      if (!hasJwt()) {
         setAuthState('noauth')
         return
       }
 
-      // ── 4. Загружаем доп. данные (параллельно) ────────────────
+      // Токен есть — загружаем приложение немедленно
+      setAuthState('ok')
+
+      // ── 4. Фоновая загрузка данных (неблокирующая) ────────────
+      // Если JWT невалидный → interceptor вызовет clearJwt() + reload()
+      if (!urlToken) {
+        // Профиль не нужно перезапрашивать если только что получили из обмена токена
+        profileAPI.getMe()
+          .then(r => setUser(r.data))
+          .catch(() => {})
+      }
+
       walletAPI.getBalance()
         .then(r => {
           const d = r.data

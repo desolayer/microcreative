@@ -12,7 +12,7 @@ export async function ensureAuthTokensTable() {
       id          SERIAL PRIMARY KEY,
       telegram_id BIGINT       NOT NULL,
       token       UUID         NOT NULL UNIQUE DEFAULT gen_random_uuid(),
-      expires_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW() + INTERVAL '5 minutes',
+      expires_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW() + INTERVAL '30 minutes',
       used        BOOLEAN      NOT NULL DEFAULT false,
       created_at  TIMESTAMPTZ  DEFAULT NOW()
     )
@@ -34,12 +34,12 @@ export async function createAuthToken(telegramId) {
   return rows[0].token
 }
 
-// ── Хелпер: выдать JWT для пользователя ──────────────────
+// ── Хелпер: выдать бессрочный JWT для пользователя ───────
 export function signJwt(user) {
   return jwt.sign(
     { userId: user.id, telegramId: user.telegram_id },
-    config.jwtSecret,
-    { expiresIn: '7d' }
+    config.jwtSecret
+    // без expiresIn — токен не истекает
   )
 }
 
@@ -139,7 +139,7 @@ router.post('/refresh', async (req, res) => {
 
     res.json({ token: signJwt(user), user })
   } catch (_) {
-    res.status(401).json({ error: 'Invalid or expired token' })
+    res.status(401).json({ error: 'Invalid token' })
   }
 })
 

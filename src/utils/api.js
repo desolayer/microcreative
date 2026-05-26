@@ -11,21 +11,9 @@ export function getJwt()        { return localStorage.getItem(JWT_KEY) || '' }
 export function setJwt(token)   { localStorage.setItem(JWT_KEY, token) }
 export function clearJwt()      { localStorage.removeItem(JWT_KEY) }
 
-/** Декодирует JWT без проверки подписи (только для чтения exp на клиенте) */
-export function decodeJwt(token) {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
-    return JSON.parse(atob(b64))
-  } catch (_) { return null }
-}
-
-/** Возвращает true если JWT существует и ещё не истёк (с запасом 60с) */
-export function isJwtValid() {
-  const token = getJwt()
-  if (!token) return false
-  const payload = decodeJwt(token)
-  if (!payload?.exp) return false
-  return payload.exp > Math.floor(Date.now() / 1000) + 60
+/** Возвращает true если JWT существует в localStorage */
+export function hasJwt() {
+  return !!getJwt()
 }
 
 // ── Читаем Telegram initData (3 источника, fallback) ─────
@@ -60,13 +48,15 @@ api.interceptors.request.use((cfg) => {
   return cfg
 })
 
-// ── Response interceptor: 401 → clearJwt ─────────────────
+// ── Response interceptor: 401 → clearJwt + reload ────────
 api.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401 && getJwt()) {
-      // JWT истёк или отозван — сбрасываем, пользователь увидит экран входа
+      // JWT повреждён или отозван — сбрасываем и перезагружаем страницу
+      // (пользователь увидит экран входа)
       clearJwt()
+      window.location.reload()
     }
     return Promise.reject(err)
   }
