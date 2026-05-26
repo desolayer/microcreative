@@ -167,9 +167,7 @@ export function startScheduler() {
     if (shouldRunDaily('deadlineAlerts',  9,  0))  deadlineAlerts().catch(console.error)
     // Понедельник 09:00 — недельный отчёт
     if (shouldRunDaily('weeklyReport',    9,  0, 1)) weeklyReport().catch(console.error)
-    // Каждый час :00 — проверка баланса CryptoBot
-    if (shouldRunHourly('cryptoBotBalance', 0))     checkCryptoBotBalance().catch(console.error)
   }, 60_000)
 
-  console.log('[Scheduler] started — daily 23:59, deadline 09:00, weekly Mon 09:00, balance check :00')
+  console.log('[Scheduler] started — daily 23:59, deadline 09:00, weekly Mon 09:00')
 }

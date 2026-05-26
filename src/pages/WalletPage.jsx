@@ -3,15 +3,15 @@ import { walletAPI, paymentsAPI } from '../utils/api'
 import { useStore } from '../store/useStore'
 
 const WITHDRAW_CURRENCIES = [
-  { asset: 'USDT',  label: 'USDT',           icon: '💵', placeholder: '10', min: 1 },
-  { asset: 'TON',   label: 'TON',            icon: '💎', placeholder: '5',  min: 0.1 },
-  { asset: 'STARS', label: 'Telegram Stars', icon: '⭐', placeholder: '100', min: 10 },
+  { asset: 'USDT',  label: 'USDT',           icon: '💵', placeholder: '0.01' },
+  { asset: 'TON',   label: 'TON',            icon: '💎', placeholder: '0.01' },
+  { asset: 'STARS', label: 'Telegram Stars', icon: '⭐', placeholder: '1'    },
 ]
 
 const CURRENCIES = [
-  { key: 'usdt',  frozen: 'frozen_usdt',  label: 'USDT',           icon: '💵', color: '#26a17b' },
-  { key: 'ton',   frozen: 'frozen_ton',   label: 'TON',            icon: '💎', color: '#0088cc' },
-  { key: 'stars', frozen: 'frozen_stars', label: 'Stars',          icon: '⭐', color: '#f59e0b' },
+  { key: 'usdt',  frozen: 'frozen_usdt',  label: 'USDT',  icon: '💵', color: '#26a17b', decimals: 2 },
+  { key: 'ton',   frozen: 'frozen_ton',   label: 'TON',   icon: '💎', color: '#0088cc', decimals: 2 },
+  { key: 'stars', frozen: 'frozen_stars', label: 'Stars', icon: '⭐', color: '#f59e0b', decimals: 0 },
 ]
 
 const DEPOSIT_ASSETS = [
@@ -110,11 +110,6 @@ export default function WalletPage() {
   const handleWithdraw = async () => {
     if (!wdAmount || parseFloat(wdAmount) <= 0) { setWdError('Введите сумму'); return }
     if (!wdAddress.trim()) { setWdError('Введите адрес кошелька'); return }
-    const cur = WITHDRAW_CURRENCIES.find(c => c.asset === wdAsset)
-    if (cur && parseFloat(wdAmount) < cur.min) {
-      setWdError(`Минимум ${cur.min} ${wdAsset}`)
-      return
-    }
     setWdLoading(true)
     setWdError(null)
     try {
@@ -178,7 +173,7 @@ export default function WalletPage() {
         {loading ? (
           <div style={st.center}><div style={st.spinner} /></div>
         ) : (
-          CURRENCIES.map(({ key, frozen, label, icon, color }) => {
+          CURRENCIES.map(({ key, frozen, label, icon, color, decimals }) => {
             const avail  = parseFloat(balance[key]  || 0)
             const locked = parseFloat(balance[frozen] || 0)
             return (
@@ -188,12 +183,12 @@ export default function WalletPage() {
                   <div>
                     <div style={st.balLabel}>{label}</div>
                     {locked > 0 && (
-                      <div style={st.balLocked}>🔒 {locked} в эскроу</div>
+                      <div style={st.balLocked}>🔒 {locked.toFixed(decimals)} в эскроу</div>
                     )}
                   </div>
                 </div>
                 <div style={st.balCardRight}>
-                  <div style={{ ...st.balAmount, color }}>{avail}</div>
+                  <div style={{ ...st.balAmount, color }}>{avail.toFixed(decimals)}</div>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button
                       style={st.depBtn}
@@ -284,7 +279,7 @@ export default function WalletPage() {
                 <input
                   style={st.depInput}
                   type="number"
-                  placeholder={`Сумма (мин. ${WITHDRAW_CURRENCIES.find(c => c.asset === wdAsset)?.min})`}
+                  placeholder={`Сумма (напр. ${WITHDRAW_CURRENCIES.find(c => c.asset === wdAsset)?.placeholder})`}
                   value={wdAmount}
                   onChange={e => setWdAmount(e.target.value)}
                   min="0"
