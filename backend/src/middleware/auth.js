@@ -5,7 +5,7 @@ import { db }     from '../config/database.js'
 import { notifyAdmin } from '../services/adminNotify.js'
 
 // ── Валидация Telegram initData (HMAC-SHA256) ─────────────
-function validateTelegramInitData(initData) {
+export function validateTelegramInitData(initData) {
   if (!initData) return { error: 'empty' }
 
   const params = new URLSearchParams(initData)
@@ -139,7 +139,7 @@ export async function authMiddleware(req, res, next) {
 }
 
 // ── getOrCreateUser (только для initData-пути) ───────────
-async function getOrCreateUser(telegramUser) {
+export async function getOrCreateUser(telegramUser) {
   const { rows } = await db.query(
     `INSERT INTO users (telegram_id, username, first_name, last_name, photo_url)
      VALUES ($1, $2, $3, $4, $5)

@@ -28,6 +28,16 @@ function removeUrlToken() {
   window.history.replaceState({}, '', url.toString())
 }
 
+// Проверяем ?autoauth=1 (открыто через MenuButton)
+function getUrlAutoauth() {
+  return new URLSearchParams(window.location.search).has('autoauth')
+}
+function removeUrlAutoauth() {
+  const url = new URL(window.location.href)
+  url.searchParams.delete('autoauth')
+  window.history.replaceState({}, '', url.toString())
+}
+
 export default function App() {
   const [currentPage, setCurrentPage]   = useState('feed')
   const [pageParams, setPageParams]     = useState(null)
@@ -43,6 +53,25 @@ export default function App() {
       api.get('/status')
         .then(r => { if (r.data.maintenance) setMaintenance(true) })
         .catch(() => {})
+
+      // ── 1а. Автовход через MenuButton (?autoauth=1) ────────────
+      // Telegram заполняет initData при открытии через web_app MenuButton
+      if (getUrlAutoauth()) {
+        removeUrlAutoauth()
+        try {
+          const r = await api.post('/auth/auto')
+          setJwt(r.data.token)
+          setUser(r.data.user)
+          console.log('[AUTH] autoauth success, JWT saved')
+        } catch (e) {
+          const d = e?.response?.data
+          if (e?.response?.status === 403 && d?.is_permanent !== undefined) {
+            setBanInfo(d); return
+          }
+          console.warn('[AUTH] autoauth failed:', d?.error, '— falling back to JWT/token check')
+          // Не страшно: дальше проверим JWT в localStorage или ?token=
+        }
+      }
 
       // ── 2. Обмен одноразового токена из URL на JWT ─────────────
       const urlToken = getUrlToken()

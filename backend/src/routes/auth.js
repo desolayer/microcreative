@@ -2,6 +2,7 @@ import { Router }      from 'express'
 import jwt             from 'jsonwebtoken'
 import { db }          from '../config/database.js'
 import { config }      from '../config/env.js'
+import { validateTelegramInitData, getOrCreateUser } from '../middleware/auth.js'
 
 const router = Router()
 
@@ -140,6 +141,58 @@ router.post('/refresh', async (req, res) => {
     res.json({ token: signJwt(user), user })
   } catch (_) {
     res.status(401).json({ error: 'Invalid token' })
+  }
+})
+
+// ── POST /api/auth/auto ───────────────────────────────────
+// Автовход при открытии через MenuButton (?autoauth=1)
+// Принимает Telegram initData (X-Telegram-Init-Data header) → JWT
+router.post('/auto', async (req, res) => {
+  const initData = req.headers['x-telegram-init-data'] || ''
+
+  if (!initData) {
+    return res.status(401).json({ error: 'initData not provided' })
+  }
+
+  const result = validateTelegramInitData(initData)
+  if (result.error) {
+    return res.status(401).json({ error: 'initData invalid', detail: result.error })
+  }
+
+  try {
+    const user = await getOrCreateUser(result.user)
+
+    // Авто-снятие истёкшего временного бана
+    if (user.banned_until && new Date(user.banned_until) <= new Date()) {
+      await db.query(
+        `UPDATE users SET banned_until = NULL, ban_reason = NULL WHERE id = $1`,
+        [user.id]
+      )
+      user.banned_until = null
+      user.ban_reason   = null
+    }
+
+    if (user.is_banned) {
+      return res.status(403).json({
+        error: 'Account permanently banned', is_permanent: true,
+        ban_reason: user.ban_reason || null,
+      })
+    }
+
+    if (user.banned_until && new Date(user.banned_until) > new Date()) {
+      return res.status(403).json({
+        error: 'Account temporarily banned', is_permanent: false,
+        banned_until: user.banned_until, ban_reason: user.ban_reason || null,
+      })
+    }
+
+    const jwtToken = signJwt(user)
+    console.log(`[AUTH] autoauth OK — telegram_id=${user.telegram_id} user_id=${user.id}`)
+    res.json({ token: jwtToken, user })
+
+  } catch (err) {
+    console.error('[AUTH] /auto error:', err)
+    res.status(500).json({ error: 'Internal server error' })
   }
 })
 

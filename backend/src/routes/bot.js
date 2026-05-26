@@ -13,6 +13,15 @@ const tg = (method, data) =>
   axios.post(`https://api.telegram.org/bot${config.telegramBotToken}/${method}`, data)
     .catch(e => console.error('TG error:', e?.response?.data?.description || e.message))
 
+// Устанавливаем MenuButton глобально (без chat_id = дефолт для всех новых чатов)
+tg('setChatMenuButton', {
+  menu_button: {
+    type:    'web_app',
+    text:    '🚀 Открыть MicroCreative',
+    web_app: { url: `${config.frontendUrl}?autoauth=1` },
+  },
+}).then(() => console.log('[BOT] Global MenuButton set'))
+
 /** Экранирует спецсимволы Markdown v1: _ * ` [ */
 const md = (s) => String(s ?? '').replace(/[_*`\[]/g, '\\$&')
 
@@ -180,7 +189,7 @@ router.post('/webhook', async (req, res) => {
     if (isPermanent || isTempBanned) return
   }
 
-  // /start — с постоянной клавиатурой + кнопкой входа с токеном
+  // /start — одно сообщение с токеном прямо в кнопке
   if (text.startsWith('/start')) {
     console.log(`[BOT] /start id=${fromId} @${uname}`)
     const token    = await createAuthToken(fromId).catch(() => null)
@@ -188,27 +197,23 @@ router.post('/webhook', async (req, res) => {
       ? `${config.frontendUrl}?token=${token}`
       : config.frontendUrl
 
+    // Устанавливаем MenuButton для этого конкретного чата
+    tg('setChatMenuButton', {
+      chat_id: chatId,
+      menu_button: {
+        type:    'web_app',
+        text:    '🚀 Открыть MicroCreative',
+        web_app: { url: `${config.frontendUrl}?autoauth=1` },
+      },
+    }).catch(() => {})
+
+    // Одно сообщение: приветствие + кнопка входа с токеном
     await tg('sendMessage', {
       chat_id: chatId,
       text:
         `👋 Добро пожаловать в *MicroCreative*!\n\n` +
         `Биржа творческих микрозаказов — дизайн, тексты, музыка и не только.\n\n` +
-        `Нажмите *«✅ Войти в приложение»* для входа 👇`,
-      parse_mode: 'Markdown',
-      reply_markup: {
-        keyboard: [
-          [{ text: '🚀 Открыть MicroCreative', web_app: { url: config.frontendUrl } }],
-          [{ text: '📜 Правила' }, { text: '📖 Инструкция' }],
-          [{ text: '🆘 Поддержка' }, { text: '👤 Мой профиль' }],
-        ],
-        resize_keyboard: true,
-        persistent: true,
-      },
-    })
-
-    await tg('sendMessage', {
-      chat_id: chatId,
-      text: '🔑 Ваша ссылка для входа действует *5 минут*:',
+        `Нажмите кнопку ниже для входа 👇`,
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [[
@@ -221,7 +226,7 @@ router.post('/webhook', async (req, res) => {
 
   // /auth — сгенерировать новый токен для входа
   if (text.startsWith('/auth')) {
-    const token    = await createAuthToken(fromId).catch(() => null)
+    const token = await createAuthToken(fromId).catch(() => null)
     if (!token) {
       await tg('sendMessage', { chat_id: chatId, text: '❌ Не удалось создать токен. Попробуйте ещё раз.' })
       return
@@ -229,8 +234,7 @@ router.post('/webhook', async (req, res) => {
     const loginUrl = `${config.frontendUrl}?token=${token}`
     await tg('sendMessage', {
       chat_id: chatId,
-      text: '🔑 Новая ссылка для входа готова. Действует *5 минут*:',
-      parse_mode: 'Markdown',
+      text: 'Нажмите кнопку для входа 👇',
       reply_markup: {
         inline_keyboard: [[
           { text: '✅ Войти в приложение', web_app: { url: loginUrl } },
