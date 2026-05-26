@@ -28,9 +28,13 @@ const md = (s) => String(s ?? '').replace(/[_*`\[]/g, '\\$&')
 const isAdmin = (id) =>
   config.adminTelegramId && parseInt(id) === parseInt(config.adminTelegramId)
 
+/** Форматирует ID заказа как #MC-000123 */
+const mcId = (id) => `#MC-${String(id).padStart(6, '0')}`
+
 // In-memory maps
-const pendingRejections = new Map() // adminId → orderId (ожидаем причину отклонения)
-const pendingSupport    = new Map() // userId → true (ожидаем сообщение поддержки)
+const pendingRejections    = new Map() // adminId → orderId (ожидаем причину отклонения)
+const pendingSupport       = new Map() // userId → true (ожидаем сообщение поддержки)
+const pendingBroadcastMedia = new Map() // adminId → true (ожидаем медиа для рассылки)
 
 // ── Лог действий администратора ──────────────────────
 function adminLog(adminId, action, type = 'info', data = {}) {
@@ -40,35 +44,27 @@ function adminLog(adminId, action, type = 'info', data = {}) {
   ).catch(() => {})
 }
 
-// ── Клавиатура главного меню /admin (константа) ───────
+// ── Клавиатура главного меню /admin ───────────────────
 const ADMIN_MENU_KEYBOARD = [
   [
-    { text: '📊 Статистика',     callback_data: 'admin:stats' },
-    { text: '❄️ Заморожено',      callback_data: 'admin:frozen' },
+    { text: '📊 Статистика',      callback_data: 'admin:stats' },
+    { text: '❄️ Заморожено',       callback_data: 'admin:frozen' },
   ],
   [
-    { text: '🔍 Модерация',      callback_data: 'admin:moderation' },
-    { text: '💸 Выводы',         callback_data: 'admin:withdrawals' },
+    { text: '🔍 Модерация',       callback_data: 'admin:moderation' },
+    { text: '💸 Выводы',          callback_data: 'admin:withdrawals' },
   ],
   [
-    { text: '😴 Без откликов',    callback_data: 'admin:lonely' },
-    { text: '📂 Категории',       callback_data: 'admin:categories' },
-  ],
-  [
-    { text: '🔍 Дубликаты',       callback_data: 'admin:duplicates' },
     { text: '🆘 Жалобы',          callback_data: 'admin:complaints' },
+    { text: '⚠️ Предупреждения',   callback_data: 'admin:warned' },
   ],
   [
     { text: '👥 Пользователи',    callback_data: 'admin:recent_users' },
     { text: '📋 Заказы',          callback_data: 'admin:recent_orders' },
   ],
   [
-    { text: '📤 Экспорт users',   callback_data: 'admin:export_users' },
-    { text: '📤 Экспорт orders',  callback_data: 'admin:export_orders' },
-  ],
-  [
-    { text: '⚠️ Предупреждения',  callback_data: 'admin:warned' },
     { text: '🔒 Заблокированные', callback_data: 'admin:blocked' },
+    { text: '💰 Баланс бота',     callback_data: 'admin:balance' },
   ],
   [
     { text: '🚫 Заблокировать',   callback_data: 'admin:ban_help' },
@@ -79,24 +75,40 @@ const ADMIN_MENU_KEYBOARD = [
     { text: '📜 Правила',         callback_data: 'admin:rules' },
   ],
   [
-    { text: '🏥 Health',          callback_data: 'admin:health' },
-    { text: '⚠️ Ошибки',          callback_data: 'admin:errors' },
-  ],
-  [
-    { text: '🔧 Версия',          callback_data: 'admin:version' },
-    { text: '🔄 Рестарт',         callback_data: 'admin:restart' },
-  ],
-  [
-    { text: '💰 Баланс бота',     callback_data: 'admin:balance' },
-    { text: '🔌 Сессии',          callback_data: 'admin:sessions' },
-  ],
-  [
-    { text: '📝 Лог действий',    callback_data: 'admin:adminlog' },
     { text: '⏳ Ожидают вывода',  callback_data: 'admin:pending' },
+    { text: '🔧 Прочее',          callback_data: 'admin:otherstuff' },
+  ],
+]
+
+// ── Клавиатура /otherstuff — второстепенные инструменты ─
+const OTHERSTUFF_MENU_KEYBOARD = [
+  [
+    { text: '🔄 Рестарт',         callback_data: 'admin:restart' },
+    { text: '🏥 Health',          callback_data: 'admin:health' },
   ],
   [
+    { text: '⚠️ Ошибки',          callback_data: 'admin:errors' },
+    { text: '🔧 Версия',          callback_data: 'admin:version' },
+  ],
+  [
+    { text: '🔌 Сессии',          callback_data: 'admin:sessions' },
+    { text: '📝 Лог действий',    callback_data: 'admin:adminlog' },
+  ],
+  [
+    { text: '📂 Категории',       callback_data: 'admin:categories' },
+    { text: '🔍 Дубликаты',       callback_data: 'admin:duplicates' },
+  ],
+  [
+    { text: '😴 Без откликов',    callback_data: 'admin:lonely' },
+    { text: '📤 Экспорт users',   callback_data: 'admin:export_users' },
+  ],
+  [
+    { text: '📤 Экспорт orders',  callback_data: 'admin:export_orders' },
     { text: '📈 Выручка сегодня', callback_data: 'admin:revenue_today' },
+  ],
+  [
     { text: '📈 За неделю',       callback_data: 'admin:revenue_week' },
+    { text: '◀️ Назад',           callback_data: 'admin:menu' },
   ],
 ]
 
@@ -139,12 +151,18 @@ router.post('/webhook', async (req, res) => {
   }
 
   const message = update.message
-  if (!message?.text) return
+  if (!message) return
 
-  const chatId = message.chat.id
-  const fromId = message.from.id
-  const text   = message.text.trim()
-  const uname  = message.from.username || 'N/A'
+  const chatId  = message.chat.id
+  const fromId  = message.from.id
+  const text    = (message.text || '').trim()
+  const photo   = message.photo    || null
+  const doc     = message.document || null
+  const caption = (message.caption || '').trim()
+  const uname   = message.from.username || 'N/A'
+
+  // Пропускаем сообщения без контента
+  if (!text && !photo && !doc) return
 
   // ── Проверяем статус бана пользователя ────────────
   const { rows: dbRows } = await db.query(
@@ -299,12 +317,28 @@ router.post('/webhook', async (req, res) => {
   // ── Обработка сообщения поддержки ───────────────────
   if (pendingSupport.has(String(fromId))) {
     pendingSupport.delete(String(fromId))
-    await handleSupportMessage(chatId, fromId, uname, text)
+    if (photo || doc) {
+      await handleSupportMedia(chatId, fromId, uname, photo, doc, caption)
+    } else {
+      await handleSupportMessage(chatId, fromId, uname, text)
+    }
+    return
+  }
+
+  // /cancelmessage — отмена обращения в поддержку (для всех пользователей)
+  if (text.startsWith('/cancelmessage')) {
+    if (pendingSupport.has(String(fromId))) {
+      pendingSupport.delete(String(fromId))
+      await tg('sendMessage', { chat_id: chatId, text: '✅ Обращение в поддержку отменено.' })
+    } else {
+      await tg('sendMessage', { chat_id: chatId, text: '✅ Нет активных обращений.' })
+    }
     return
   }
 
   // ── Ожидаем причину отклонения заказа (только admin) ─
   if (isAdmin(fromId) && pendingRejections.has(String(fromId))) {
+    if (!text) return
     const orderId = pendingRejections.get(String(fromId))
     pendingRejections.delete(String(fromId))
     await rejectOrder(chatId, fromId, orderId, text)
@@ -313,9 +347,22 @@ router.post('/webhook', async (req, res) => {
 
   // Все команды ниже — только администратор
   if (!isAdmin(fromId)) return
+
+  // ── Медиа для рассылки ────────────────────────────────
+  if (pendingBroadcastMedia.has(String(fromId)) && (photo || doc)) {
+    pendingBroadcastMedia.delete(String(fromId))
+    await doMediaBroadcast(chatId, photo, doc, caption)
+    return
+  }
+
+  // Дальше только текстовые команды
+  if (!text) return
+
   adminLog(fromId, `cmd: ${text.split(' ')[0]}`)
 
   if (text === '/admin')        { await sendAdminMenu(chatId);                      return }
+  if (text === '/otherstuff')   { await sendOtherstuffMenu(chatId);                 return }
+  if (text === '/broadcastmedia') { await startBroadcastMedia(chatId, fromId);      return }
   if (text === '/moderation')   { await sendModeration(chatId);                     return }
   if (text === '/stats')        { await sendStats(chatId);                          return }
   if (text === '/frozen')       { await sendFrozen(chatId);                         return }
@@ -439,6 +486,30 @@ async function handleSupportMessage(chatId, fromId, username, text) {
   }
 }
 
+async function handleSupportMedia(chatId, fromId, username, photo, doc, caption) {
+  const who = username !== 'N/A' ? `@${username}` : `ID ${fromId}`
+  await tg('sendMessage', { chat_id: chatId, text: `✅ Ваш файл отправлен в поддержку. Мы ответим в ближайшее время.` })
+  if (!config.adminTelegramId) return
+  const replyBtn = {
+    inline_keyboard: [[
+      { text: `💬 Ответить ${who}`, callback_data: `support_reply:${fromId}:${username}` },
+    ]],
+  }
+  const cap = `🆘 *Медиа в поддержку*\nОт: ${md(who)}` + (caption ? `\n${md(caption)}` : '')
+  if (photo) {
+    const fileId = photo[photo.length - 1].file_id
+    await tg('sendPhoto', {
+      chat_id: config.adminTelegramId, photo: fileId,
+      caption: cap, parse_mode: 'Markdown', reply_markup: replyBtn,
+    }).catch(() => {})
+  } else if (doc) {
+    await tg('sendDocument', {
+      chat_id: config.adminTelegramId, document: doc.file_id,
+      caption: cap, parse_mode: 'Markdown', reply_markup: replyBtn,
+    }).catch(() => {})
+  }
+}
+
 async function showUserProfile(chatId, telegramId) {
   const { rows } = await db.query(
     `SELECT username, first_name, rating, completed_deals,
@@ -480,6 +551,24 @@ async function sendAdminMenu(chatId) {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: ADMIN_MENU_KEYBOARD },
   })
+}
+
+async function sendOtherstuffMenu(chatId, msgId = null) {
+  const payload = {
+    chat_id: chatId,
+    text: '🔧 *Дополнительные инструменты*',
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: OTHERSTUFF_MENU_KEYBOARD },
+  }
+  if (msgId) {
+    payload.message_id = msgId
+    await tg('editMessageText', payload).catch(e => {
+      const desc = String(e?.response?.data?.description || '')
+      if (!desc.includes('not modified')) console.error('editMenu err:', desc)
+    })
+  } else {
+    await tg('sendMessage', payload)
+  }
 }
 
 // ════════════════════════════════════════════════════
@@ -598,8 +687,8 @@ async function sendVersion(chatId, msgId = null) {
 
 async function doRestart(chatId, adminId) {
   adminLog(adminId, 'restart', 'warning')
-  await tg('sendMessage', { chat_id: chatId, text: '🔄 Перезапускаю процесс... Railway поднимет новый.' })
-  setTimeout(() => process.exit(0), 1500)
+  await tg('sendMessage', { chat_id: chatId, text: '♻️ Перезапускаю... Railway поднимет новый контейнер.' })
+  setTimeout(() => process.exit(0), 1000)
 }
 
 // ════════════════════════════════════════════════════
@@ -947,6 +1036,40 @@ async function doBroadcast(chatId, text) {
   await tg('sendMessage', { chat_id: chatId, text: `📢 Готово\n✅ ${sent}\n❌ ${failed}` })
 }
 
+async function startBroadcastMedia(chatId, adminId) {
+  pendingBroadcastMedia.set(String(adminId), true)
+  await tg('sendMessage', {
+    chat_id: chatId,
+    text: '📸 Пришлите фото или документ для медиа-рассылки.\nПодпись к файлу будет включена в рассылку.\n\n_Для отмены: /admin_',
+    parse_mode: 'Markdown',
+  })
+}
+
+async function doMediaBroadcast(chatId, photo, doc, caption) {
+  const { rows } = await db.query(`SELECT telegram_id FROM users WHERE is_banned=FALSE`)
+  await tg('sendMessage', { chat_id: chatId, text: `📢 Медиа-рассылка на ${rows.length} пользователей...` })
+  let sent = 0, failed = 0
+  for (const user of rows) {
+    try {
+      if (photo) {
+        const fileId = photo[photo.length - 1].file_id
+        await tg('sendPhoto', {
+          chat_id: user.telegram_id, photo: fileId,
+          ...(caption ? { caption } : {}),
+        })
+      } else if (doc) {
+        await tg('sendDocument', {
+          chat_id: user.telegram_id, document: doc.file_id,
+          ...(caption ? { caption } : {}),
+        })
+      }
+      sent++
+    } catch { failed++ }
+    await new Promise(r => setTimeout(r, 50))
+  }
+  await tg('sendMessage', { chat_id: chatId, text: `📢 Медиа-рассылка готова\n✅ ${sent}\n❌ ${failed}` })
+}
+
 async function msgUser(chatId, username, text) {
   const { rows } = await db.query(`SELECT telegram_id FROM users WHERE LOWER(username)=LOWER($1)`, [username.replace('@','')])
   if (!rows[0]) { await tg('sendMessage', { chat_id: chatId, text: `❌ @${username} не найден` }); return }
@@ -1151,7 +1274,7 @@ async function sendModeration(chatId, msgId = null) {
     await tg('sendMessage', {
       chat_id: chatId,
       text:
-        `🔍 *#${o.id}* от ${who}\n` +
+        `🔍 *${mcId(o.id)}* от ${who}\n` +
         `📂 ${md(o.category)}   💰 ${o.budget} ${o.currency}\n` +
         `📝 *${md(o.title)}*\n` +
         `${desc}\n` +
@@ -1366,6 +1489,12 @@ async function handleCallback(cq) {
       const desc = String(e?.response?.data?.description || '')
       if (!desc.includes('not modified')) console.error('editMenu err:', desc)
     })
+    return
+  }
+
+  // ── Прочее (otherstuff) ───────────────────────────────
+  if (data === 'admin:otherstuff') {
+    await sendOtherstuffMenu(chatId, msgId)
     return
   }
 

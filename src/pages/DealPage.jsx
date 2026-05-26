@@ -34,6 +34,12 @@ const PAY_CURRENCIES = [
   { asset: 'XTR',   label: 'Telegram Stars', icon: '⭐' },
 ]
 
+// Derive backend base URL for file serving
+const BACKEND_URL = (() => {
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
+  return apiUrl.replace(/\/api$/, '')
+})()
+
 export default function DealPage({ dealId, onBack }) {
   const { user } = useStore()
   const [deal, setDeal]             = useState(null)
@@ -45,6 +51,12 @@ export default function DealPage({ dealId, onBack }) {
   const [completing, setCompleting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [actionError, setActionError] = useState(null)
+  // File upload
+  const [uploading, setUploading]   = useState(false)
+  const fileInputRef                = useRef(null)
+  // Cancel deal
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [cancelling, setCancelling]               = useState(false)
   // Currency picker sheet
   const [showPaySheet, setShowPaySheet] = useState(false)
   const [paying, setPaying]             = useState(false)
@@ -179,6 +191,43 @@ export default function DealPage({ dealId, onBack }) {
     }
   }
 
+  // ── Cancel deal ──
+  const handleCancel = async () => {
+    setCancelling(true)
+    setActionError(null)
+    try {
+      await dealsAPI.cancel(dealId)
+      setDeal(prev => ({ ...prev, status: 'cancelled' }))
+      setShowCancelConfirm(false)
+    } catch (e) {
+      setActionError(e.response?.data?.error || 'Ошибка отмены')
+      setShowCancelConfirm(false)
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  // ── Upload file ──
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setUploading(true)
+    setActionError(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await dealsAPI.uploadFile(dealId, fd)
+      setMessages(prev =>
+        prev.some(m => m.id === res.data.id) ? prev : [...prev, res.data]
+      )
+    } catch (e) {
+      setActionError(e.response?.data?.error || 'Ошибка загрузки файла')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   // ── States ──────────────────────────────────────────
   if (loading) return (
     <div style={{ ...st.page, alignItems: 'center', justifyContent: 'center' }}>
@@ -292,6 +341,42 @@ export default function DealPage({ dealId, onBack }) {
         {deal.status === 'cancelled' && (
           <p style={{ ...st.waitNote, color: '#6b7280' }}>❌ Сделка отменена</p>
         )}
+
+        {/* Cancel button — visible for pending/active (both sides) */}
+        {['pending', 'active'].includes(deal.status) && !showCancelConfirm && (
+          <button
+            onClick={() => setShowCancelConfirm(true)}
+            style={st.cancelDealBtn}
+          >
+            🚪 Отказаться от сделки
+          </button>
+        )}
+
+        {/* Cancel confirmation */}
+        {showCancelConfirm && (
+          <div style={st.cancelConfirm}>
+            <p style={st.cancelConfirmText}>
+              {deal.status === 'active'
+                ? '⚠️ Средства в эскроу будут возвращены заказчику. Уверены?'
+                : 'Вы уверены, что хотите отменить сделку?'}
+            </p>
+            <div style={st.cancelConfirmBtns}>
+              <button
+                onClick={() => setShowCancelConfirm(false)}
+                style={st.cancelKeepBtn}
+              >
+                Нет
+              </button>
+              <button
+                onClick={handleCancel}
+                disabled={cancelling}
+                style={{ ...st.cancelConfirmYesBtn, opacity: cancelling ? 0.5 : 1 }}
+              >
+                {cancelling ? 'Отменяем...' : 'Да, отменить'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Action error (send / submit / complete) */}
@@ -303,11 +388,30 @@ export default function DealPage({ dealId, onBack }) {
           <p style={st.noMsgs}>Напишите первое сообщение 👋</p>
         )}
         {messages.map(msg => {
-          const mine = msg.sender_id === user?.id
+          const mine    = msg.sender_id === user?.id
+          const hasFile = !!msg.file_url
+          const isImage = hasFile && /\.(jpg|jpeg|png|gif)$/i.test(msg.file_name || '')
+          const fileUrl = hasFile ? `${BACKEND_URL}${msg.file_url}` : null
           return (
             <div key={msg.id} style={{ ...st.msgRow, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
               <div style={{ ...st.bubble, background: mine ? '#6d28d9' : '#1e1e1e' }}>
-                <div style={st.bubbleText}>{msg.text}</div>
+                {hasFile ? (
+                  isImage ? (
+                    <a href={fileUrl} target="_blank" rel="noreferrer">
+                      <img
+                        src={fileUrl}
+                        alt={msg.file_name}
+                        style={st.bubbleImg}
+                      />
+                    </a>
+                  ) : (
+                    <a href={fileUrl} target="_blank" rel="noreferrer" style={st.fileLink}>
+                      📎 {msg.file_name || 'Файл'}
+                    </a>
+                  )
+                ) : (
+                  <div style={st.bubbleText}>{msg.text}</div>
+                )}
                 <div style={st.bubbleTime}>{fmtTime(msg.created_at)}</div>
               </div>
             </div>
@@ -319,6 +423,26 @@ export default function DealPage({ dealId, onBack }) {
       {/* ── Input (available for all non-terminal statuses) ── */}
       {canChat && (
         <div style={st.inputArea}>
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".jpg,.jpeg,.png,.gif,.pdf,.zip,.ai,.psd"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+          {/* Attachment button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            style={{ ...st.attachBtn, opacity: uploading ? 0.5 : 1 }}
+            title="Прикрепить файл"
+          >
+            {uploading
+              ? <div style={st.uploadSpinner} />
+              : <i className="ti ti-paperclip" style={{ fontSize: 18 }} />
+            }
+          </button>
           <input
             style={st.input}
             value={text}
@@ -472,6 +596,17 @@ const st = {
     position: 'sticky', bottom: 0, flexShrink: 0,
     paddingBottom: 'max(10px, env(safe-area-inset-bottom))',
   },
+  attachBtn: {
+    width: 42, height: 42, borderRadius: '50%',
+    background: '#1e1e1e', border: '0.5px solid #2a2a2a', color: '#666',
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, transition: 'opacity 0.2s',
+  },
+  uploadSpinner: {
+    width: 16, height: 16, borderRadius: '50%',
+    border: '2px solid #444', borderTopColor: '#a78bfa',
+    animation: 'spin 0.7s linear infinite',
+  },
   input: {
     flex: 1, padding: '10px 14px',
     background: '#1e1e1e', border: '0.5px solid #2a2a2a',
@@ -482,6 +617,40 @@ const st = {
     background: '#a78bfa', border: 'none', color: '#0f0f0f',
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     flexShrink: 0, transition: 'opacity 0.2s',
+  },
+  // File messages
+  bubbleImg: {
+    maxWidth: '100%', maxHeight: 200, borderRadius: 10,
+    display: 'block', cursor: 'pointer',
+  },
+  fileLink: {
+    color: '#a78bfa', fontSize: 13, textDecoration: 'none', wordBreak: 'break-all',
+  },
+  // Cancel deal
+  cancelDealBtn: {
+    width: '100%', padding: '10px', marginTop: 8,
+    background: 'transparent', border: '0.5px solid #3a1a1a',
+    borderRadius: 12, color: '#ef4444', fontSize: 13,
+    cursor: 'pointer', fontFamily: 'inherit',
+  },
+  cancelConfirm: {
+    marginTop: 10, padding: '12px 14px',
+    background: '#1a0e0e', border: '0.5px solid #3a1a1a', borderRadius: 12,
+  },
+  cancelConfirmText: {
+    fontSize: 13, color: '#aaa', textAlign: 'center', margin: '0 0 10px',
+  },
+  cancelConfirmBtns: { display: 'flex', gap: 8 },
+  cancelKeepBtn: {
+    flex: 1, padding: '10px', borderRadius: 10,
+    background: '#222', border: '0.5px solid #333',
+    color: '#888', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+  },
+  cancelConfirmYesBtn: {
+    flex: 1, padding: '10px', borderRadius: 10,
+    background: '#2a1010', border: '0.5px solid #5a1a1a',
+    color: '#ef4444', fontSize: 13, fontWeight: 600,
+    cursor: 'pointer', fontFamily: 'inherit', transition: 'opacity 0.2s',
   },
 
   // Currency picker bottomsheet

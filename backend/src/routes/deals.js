@@ -1,4 +1,7 @@
 import { Router } from 'express'
+import multer from 'multer'
+import path   from 'path'
+import fs     from 'fs'
 import { db } from '../config/database.js'
 import { lockEscrow, releaseEscrow, refundEscrow } from '../services/escrow.js'
 import { notifyAdmin } from '../services/adminNotify.js'
@@ -7,6 +10,41 @@ import { broadcastToDeal, sendToUser } from '../services/websocket.js'
 import { createCryptoBotInvoice } from '../services/cryptobot.js'
 
 const router = Router()
+
+// ── Multer — загрузка файлов ──────────────────────────
+const uploadStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(process.cwd(), 'uploads', 'deals', String(req.params.id))
+    fs.mkdirSync(dir, { recursive: true })
+    cb(null, dir)
+  },
+  filename: (req, file, cb) => {
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const ext    = path.extname(file.originalname).toLowerCase()
+    cb(null, `${unique}${ext}`)
+  },
+})
+
+const ALLOWED_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.pdf', '.zip', '.ai', '.psd']
+
+const upload = multer({
+  storage: uploadStorage,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 МБ
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase()
+    cb(null, ALLOWED_EXTS.includes(ext))
+  },
+})
+
+// ── Миграция: добавляем колонки для файлов в messages ─
+export async function ensureMessagesFileColumns() {
+  await db.query(`
+    ALTER TABLE messages
+      ADD COLUMN IF NOT EXISTS file_url  TEXT,
+      ADD COLUMN IF NOT EXISTS file_name TEXT,
+      ADD COLUMN IF NOT EXISTS file_type TEXT
+  `)
+}
 
 // GET /api/deals — все сделки текущего пользователя
 router.get('/', async (req, res, next) => {
@@ -149,6 +187,73 @@ router.post('/:id/messages', async (req, res, next) => {
   }
 })
 
+// POST /api/deals/:id/upload — загрузка файла в чат сделки
+router.post('/:id/upload', upload.single('file'), async (req, res, next) => {
+  try {
+    const dealId = req.params.id
+
+    if (!req.file) return res.status(400).json({ error: 'Файл не загружен' })
+
+    const { rows: dealRows } = await db.query(
+      `SELECT * FROM deals WHERE id = $1 AND (client_id = $2 OR freelancer_id = $2)`,
+      [dealId, req.user.id]
+    )
+    const deal = dealRows[0]
+    if (!deal) return res.status(404).json({ error: 'Deal not found' })
+    if (['completed', 'cancelled'].includes(deal.status)) {
+      return res.status(400).json({ error: 'Cannot upload to a closed deal' })
+    }
+
+    const fileUrl  = `/uploads/deals/${dealId}/${req.file.filename}`
+    const fileName = req.file.originalname
+    const fileType = req.file.mimetype || ''
+
+    const { rows } = await db.query(
+      `INSERT INTO messages (deal_id, sender_id, text, file_url, file_name, file_type)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [dealId, req.user.id, fileName, fileUrl, fileName, fileType]
+    )
+    const newMsg = rows[0]
+
+    // Уведомление другой стороне
+    const recipientId = deal.client_id === req.user.id ? deal.freelancer_id : deal.client_id
+    await db.query(
+      `INSERT INTO notifications (user_id, type, title, body, data)
+       VALUES ($1, 'message_received', $2, $3, $4)`,
+      [
+        recipientId,
+        'Новый файл',
+        `${req.user.first_name} прислал файл: ${fileName.substring(0, 60)}`,
+        JSON.stringify({ deal_id: parseInt(dealId) }),
+      ]
+    ).catch(() => {})
+
+    broadcastToDeal(deal.client_id, deal.freelancer_id, {
+      type: 'new_message',
+      message: {
+        ...newMsg,
+        first_name: req.user.first_name,
+        username:   req.user.username,
+        photo_url:  req.user.photo_url,
+      },
+    })
+
+    notifyUserById(
+      recipientId,
+      `📎 *${req.user.first_name}* прислал файл: ${fileName.substring(0, 80)}`,
+      'message'
+    ).catch(() => {})
+
+    res.status(201).json(newMsg)
+  } catch (err) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'Файл слишком большой (максимум 20 МБ)' })
+    }
+    next(err)
+  }
+})
+
 // POST /api/deals/:id/complete — заказчик подтверждает выполнение
 router.post('/:id/complete', async (req, res, next) => {
   try {
@@ -254,13 +359,15 @@ router.post('/:id/dispute', async (req, res, next) => {
   }
 })
 
-// POST /api/deals/:id/cancel — отмена (только в статусе pending)
+// POST /api/deals/:id/cancel — отмена сделки
 router.post('/:id/cancel', async (req, res, next) => {
   try {
     const dealId = req.params.id
 
     const { rows } = await db.query(
-      `SELECT * FROM deals WHERE id = $1 AND (client_id = $2 OR freelancer_id = $2)`,
+      `SELECT d.*, o.title AS order_title FROM deals d
+       JOIN orders o ON o.id = d.order_id
+       WHERE d.id = $1 AND (d.client_id = $2 OR d.freelancer_id = $2)`,
       [dealId, req.user.id]
     )
     const deal = rows[0]
@@ -280,7 +387,37 @@ router.post('/:id/cancel', async (req, res, next) => {
       await db.query(`UPDATE orders SET status = 'open' WHERE id = $1`, [deal.order_id])
     }
 
-    res.json({ success: true, status: 'cancelled' })
+    // Определяем другую сторону
+    const otherUserId = deal.client_id === req.user.id ? deal.freelancer_id : deal.client_id
+    const initiator   = req.user.first_name || req.user.username || '?'
+
+    // DB-уведомление другой стороне
+    await db.query(
+      `INSERT INTO notifications (user_id, type, title, body, data)
+       VALUES ($1, 'deal_cancelled', $2, $3, $4)`,
+      [
+        otherUserId,
+        'Сделка отменена',
+        `${initiator} отменил сделку по заказу «${deal.order_title}»`,
+        JSON.stringify({ deal_id: parseInt(dealId), order_id: deal.order_id }),
+      ]
+    ).catch(() => {})
+
+    // TG-уведомление другой стороне
+    notifyUserById(
+      otherUserId,
+      `🚪 *${initiator}* отменил сделку.\nЗаказ «${deal.order_title}» снова открыт.`,
+      'deal_cancelled'
+    ).catch(() => {})
+
+    // WebSocket обоим участникам
+    broadcastToDeal(deal.client_id, deal.freelancer_id, {
+      type:   'deal_status',
+      dealId: parseInt(dealId),
+      status: 'cancelled',
+    })
+
+    res.json({ success: true, status: 'cancelled', order_id: deal.order_id })
   } catch (err) {
     next(err)
   }

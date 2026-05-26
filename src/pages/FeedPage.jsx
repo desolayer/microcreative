@@ -164,6 +164,8 @@ function OrderCard({ order, onClick }) {
     ? `$${order.price}`
     : `${order.price.toLocaleString('ru')} ₽`
 
+  const mcId = `#MC-${String(order.id).padStart(6, '0')}`
+
   return (
     <div
       style={{
@@ -179,6 +181,7 @@ function OrderCard({ order, onClick }) {
         </span>
         <span style={styles.price}>{priceLabel}</span>
       </div>
+      <div style={styles.cardId}>{mcId}</div>
       <div style={styles.cardTitle}>{order.title}</div>
       <div style={styles.cardDesc}>{order.desc}</div>
       <div style={styles.cardFooter}>
@@ -265,6 +268,7 @@ const styles = {
     borderRadius: 16, padding: 16, cursor: 'pointer',
   },
   featuredLabel: { fontSize: 10, color: '#a78bfa', fontWeight: 500, marginBottom: 6 },
+  cardId: { fontSize: 10, color: '#444', marginBottom: 4, fontVariantNumeric: 'tabular-nums' },
   cardTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   badge: { fontSize: 11, fontWeight: 500, padding: '4px 10px', borderRadius: 6 },
   price: { fontSize: 17, fontWeight: 500, color: '#a78bfa' },

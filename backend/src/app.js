@@ -1,21 +1,23 @@
 import './config/env.js'  // загружаем и валидируем переменные окружения
-import { createServer } from 'http'
-import express from 'express'
-import cors from 'cors'
-import helmet from 'helmet'
-import morgan from 'morgan'
-import rateLimit from 'express-rate-limit'
+import { createServer }   from 'http'
+import { fileURLToPath }  from 'url'
+import { dirname, join }  from 'path'
+import express            from 'express'
+import cors               from 'cors'
+import helmet             from 'helmet'
+import morgan             from 'morgan'
+import rateLimit          from 'express-rate-limit'
 
 import { authMiddleware } from './middleware/auth.js'
-import { errorHandler } from './middleware/errorHandler.js'
-import { config } from './config/env.js'
-import { pool } from './config/database.js'
+import { errorHandler }   from './middleware/errorHandler.js'
+import { config }         from './config/env.js'
+import { pool }           from './config/database.js'
 import { setupWebSocket } from './services/websocket.js'
 import { startScheduler } from './services/scheduler.js'
-import { notifyAdmin } from './services/adminNotify.js'
+import { notifyAdmin }    from './services/adminNotify.js'
 
 import ordersRouter        from './routes/orders.js'
-import dealsRouter         from './routes/deals.js'
+import dealsRouter, { ensureMessagesFileColumns } from './routes/deals.js'
 import walletRouter        from './routes/wallet.js'
 import paymentsRouter      from './routes/payments.js'
 import webhooksRouter      from './routes/webhooks.js'
@@ -25,6 +27,9 @@ import botRouter           from './routes/bot.js'
 import supportRouter       from './routes/support.js'
 import authRouter, { ensureAuthTokensTable } from './routes/auth.js'
 
+const __filename = fileURLToPath(import.meta.url)
+const __dirname  = dirname(__filename)
+
 const app = express()
 
 // Railway / Render / Vercel — за reverse proxy
@@ -33,8 +38,6 @@ app.set('trust proxy', 1)
 // ── Базовые мидлвары ─────────────────────────────────
 app.use(helmet())
 app.use(cors({
-  // Разрешаем любой origin — безопасность обеспечивается HMAC-валидацией initData,
-  // а не CORS (Telegram Mini Apps открываются из разных origin-контекстов)
   origin: true,
   credentials: false,
   allowedHeaders: [
@@ -54,6 +57,10 @@ const limiter = rateLimit({
   message: { error: 'Too many requests, please slow down' },
 })
 app.use('/api', limiter)
+
+// ── Статические файлы (загрузки сделок) ──────────────
+// Файлы хранятся в <project_root>/uploads/
+app.use('/uploads', express.static(join(__dirname, '../../uploads')))
 
 // ── Публичные эндпоинты (без авторизации) ────────────
 app.use('/api/webhooks', webhooksRouter)
@@ -116,6 +123,11 @@ server.listen(config.port, async () => {
   await ensureAuthTokensTable()
     .then(() => console.log('[DB] auth_tokens table ready'))
     .catch(err => console.error('[DB] auth_tokens migration error:', err))
+
+  // Добавляем колонки для файлов в messages (если нет)
+  await ensureMessagesFileColumns()
+    .then(() => console.log('[DB] messages file columns ready'))
+    .catch(err => console.error('[DB] messages migration error:', err))
 
   startScheduler()
 

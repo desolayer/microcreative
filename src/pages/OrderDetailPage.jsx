@@ -135,7 +135,10 @@ export default function OrderDetailPage({ orderId, onBack }) {
           <span style={{ ...s.badge, background: cat.bg, color: cat.color }}>
             {order.category}
           </span>
-          <span style={s.timeAgo}>{timeAgo(order.created_at)}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={s.mcId}>{`#MC-${String(order.id).padStart(6, '0')}`}</span>
+            <span style={s.timeAgo}>{timeAgo(order.created_at)}</span>
+          </div>
         </div>
 
         {/* Заголовок */}
@@ -330,7 +333,7 @@ function RespondView({ order, onBack, onSuccess }) {
       <Header
         onBack={onBack}
         title="Откликнуться"
-        right={<span style={{ fontSize: 12, color: '#555' }}>#{order.id}</span>}
+        right={<span style={{ fontSize: 12, color: '#555' }}>{`#MC-${String(order.id).padStart(6, '0')}`}</span>}
       />
 
       <div style={s.body}>
@@ -480,6 +483,7 @@ const s = {
   topRow:    { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   badge:     { fontSize: 11, fontWeight: 500, padding: '4px 10px', borderRadius: 6 },
   timeAgo:   { fontSize: 11, color: '#444' },
+  mcId:      { fontSize: 11, color: '#555', fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' },
   title:     { fontSize: 20, fontWeight: 600, color: '#e5e5e5', lineHeight: 1.35, marginBottom: 16 },
 
   priceCard: {

@@ -79,6 +79,9 @@ export const dealsAPI = {
   getOne: (id) => api.get(`/deals/${id}`),
   getMessages: (dealId) => api.get(`/deals/${dealId}/messages`),
   sendMessage: (dealId, message) => api.post(`/deals/${dealId}/messages`, { message }),
+  uploadFile: (dealId, formData) => api.post(`/deals/${dealId}/upload`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
   pay: (dealId, asset) => api.post(`/deals/${dealId}/pay`, asset ? { asset } : {}),
   submit: (dealId) => api.post(`/deals/${dealId}/submit`),
   activate: (dealId) => api.post(`/deals/${dealId}/activate`),
